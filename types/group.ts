@@ -43,6 +43,7 @@ export type ProposalStatus =
 
 export interface Proposal {
   _id: string;
+  groupId: string;
   title: string;
   description: string;
   creator: string;

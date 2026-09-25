@@ -34,6 +34,10 @@ export default function ProposalDetailPage() {
     refetchOnReconnect: true,
     queryFn: ({ signal }) => apiClient<ProposalResponse>(`/api/proposals/${proposalId}`, { signal }),
   });
+
+  if (query.isPending) return <LoadingState label="Opening this proposal…" />;
+  if (query.error || !query.data) return <ErrorState message={query.error?.message || "Proposal not found."} onRetry={() => void query.refetch()} />;
+
   const proposal = query.data;
 
   async function walletOrThrow() {
@@ -61,9 +65,6 @@ export default function ProposalDetailPage() {
     finally { pending.current = false; }
   }
 
-  if (query.isPending) return <LoadingState label="Opening this proposal…" />;
-  if (query.error || !proposal) return <ErrorState message={query.error?.message || "Proposal not found."} onRetry={() => void query.refetch()} />;
-
   const permissions = proposal.permissions || { isCreator: false, isAdmin: false, isValidator: false, isMember: true };
   const isCancelled = proposal.status === "Cancelled" || proposal.blockchainStatus === "CANCELLED";
   const isReleased = proposal.status === "Released" || proposal.blockchainStatus === "RELEASED";
@@ -77,7 +78,8 @@ export default function ProposalDetailPage() {
     await run(async () => {
       await walletOrThrow();
       const { getContract } = await import("@/lib/blockchain");
-      const tx = await (await getContract()).donate(proposal._id, { value: amountAtomic });
+      const contract = await getContract();
+      const tx = await contract.donate(proposal._id, { value: amountAtomic });
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}/donate`, { method: "POST", body: JSON.stringify({ txHash: tx.hash }) });
       setDonationAmount("0.001");
@@ -97,7 +99,8 @@ export default function ProposalDetailPage() {
       const validators = members.filter((member) => member.role === "Validator" && member.status === "ACTIVE" && member.walletAddress).map((member) => getAddress(member.walletAddress));
       if (!validators.length) throw new Error("At least one active validator with a verified wallet is required.");
       const deadline = Math.floor(new Date(proposal.deadline).getTime() / 1000);
-      const tx = await (await getContract()).createCampaign(proposal._id, BigInt(proposal.targetAmountAtomic), deadline, proposal.recipientWallet, validators);
+      const contract = await getContract();
+      const tx = await contract.createCampaign(proposal._id, BigInt(proposal.targetAmountAtomic), deadline, proposal.recipientWallet, validators);
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}`, { method: "PATCH", body: JSON.stringify({ blockchainStatus: "CREATED", blockchainCreateTxHash: tx.hash }) });
       setMessage("Proposal registered on-chain. Waiting for admin to activate funding.");
@@ -111,7 +114,8 @@ export default function ProposalDetailPage() {
       const { getContract, getContractAdmin } = await import("@/lib/blockchain");
       const live = await (await import("@/lib/blockchain")).getWalletAddress();
       if ((await getContractAdmin()).toLowerCase() !== live.toLowerCase()) throw new Error("Connected wallet is not the PLEDGR contract admin.");
-      const tx = await (await getContract()).approveCampaign(proposal._id);
+      const contract = await getContract();
+      const tx = await contract.approveCampaign(proposal._id);
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}`, { method: "PATCH", body: JSON.stringify({ blockchainStatus: "APPROVED", blockchainApprovalTxHash: tx.hash }) });
       setMessage("Funding is now open on-chain.");
@@ -139,7 +143,8 @@ export default function ProposalDetailPage() {
       const liveWallet = await walletOrThrow();
       if (liveWallet.toLowerCase() !== proposal.recipientWallet.toLowerCase()) throw new Error("Connect the fundraiser wallet to request withdrawal.");
       const { getContract } = await import("@/lib/blockchain");
-      const tx = await (await getContract()).requestWithdrawal(proposal._id);
+      const contract = await getContract();
+      const tx = await contract.requestWithdrawal(proposal._id);
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}/withdraw`, { method: "POST", body: JSON.stringify({ txHash: tx.hash }) });
     });
@@ -151,7 +156,8 @@ export default function ProposalDetailPage() {
         if (permissions.isAdmin && proposal.withdrawalStatus === "ValidatorApproved") {
           await walletOrThrow();
           const { getContract } = await import("@/lib/blockchain");
-          const tx = await (await getContract()).resetValidatorReleaseApproval(proposal._id);
+          const contract = await getContract();
+          const tx = await contract.resetValidatorReleaseApproval(proposal._id);
           await tx.wait();
           await apiClient(`/api/proposals/${proposal._id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action, resetTxHash: tx.hash }) });
         } else {
@@ -176,9 +182,10 @@ export default function ProposalDetailPage() {
       const { getContract, getContractAdmin, getWalletAddress } = await import("@/lib/blockchain");
       const live = await getWalletAddress();
       if ((await getContractAdmin()).toLowerCase() !== live.toLowerCase()) throw new Error("Connected wallet is not the PLEDGR contract admin.");
-      const campaign = await getContract().getCampaign(proposal._id);
+      const contract = await getContract();
+      const campaign = await contract.getCampaign(proposal._id);
       if (BigInt(campaign.totalRaised) <= 0n) throw new Error("There are no BOT funds to release.");
-      const tx = await getContract().releaseFund(proposal._id);
+      const tx = await contract.releaseFund(proposal._id);
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}/release`, { method: "POST", body: JSON.stringify({ txHash: tx.hash }) });
     });
@@ -193,9 +200,10 @@ export default function ProposalDetailPage() {
         return;
       }
       const { getContract, getContractAdmin } = await import("@/lib/blockchain");
+      const contract = await getContract();
       const fundraiser = live.toLowerCase() === proposal.recipientWallet.toLowerCase();
       if (!fundraiser && (await getContractAdmin()).toLowerCase() !== live.toLowerCase()) throw new Error("Connect the fundraiser wallet or PLEDGR contract admin wallet to cancel on-chain.");
-      const tx = await getContract().cancelCampaign(proposal._id);
+      const tx = await contract.cancelCampaign(proposal._id);
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}/cancel`, { method: "POST", body: JSON.stringify({ txHash: tx.hash }) });
     });
@@ -212,7 +220,8 @@ export default function ProposalDetailPage() {
       const { getContract, getReadContract } = await import("@/lib/blockchain");
       const refundable = BigInt(await getReadContract().getRefundableAmount(proposal._id, donor));
       if (refundable <= 0n) throw new Error("This wallet has no BOT refund remaining.");
-      const tx = await getContract().claimRefund(proposal._id);
+      const contract = await getContract();
+      const tx = await contract.claimRefund(proposal._id);
       await tx.wait();
       await apiClient(`/api/proposals/${proposal._id}/refund`, { method: "POST", body: JSON.stringify({ txHash: tx.hash }) });
       setMessage(`Refund confirmed: ${formatBotAmount(refundable)} BOT returned to your wallet.`);

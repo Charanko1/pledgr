@@ -109,8 +109,6 @@ export async function syncVerifiedBlockchainEvent({ proposalId, txHash, eventTyp
   if (eventType === "CampaignCreated" || eventType === "CampaignApproved" || eventType === "AdminReleaseApproved") {
     if (getAddress(tx.from) !== contractAdmin) throw new Error("The transaction sender is not the PLEDGR contract admin.");
     if (eventType !== "CampaignCreated" && getAddress(meta.actor) !== contractAdmin) throw new Error("The blockchain admin event actor is invalid.");
-  } else if (eventType === "CampaignCreated") {
-    // handled above; campaign creator is intentionally the fundraiser wallet.
   } else if (getAddress(meta.actor) !== getAddress(tx.from)) {
     throw new Error("The blockchain event actor does not match the transaction sender.");
   }

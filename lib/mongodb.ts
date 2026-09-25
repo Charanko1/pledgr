@@ -1,14 +1,14 @@
-import mongoose from "mongoose";
+import mongoose, { type Connection } from "mongoose";
 import GroupJoinRequest from "@/models/GroupJoinRequest";
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONGODB_URI ?? "";
 if (!MONGODB_URI) throw new Error("MONGODB_URI is missing");
 
 let indexesReady = false;
 
 declare global {
   var mongooseCache:
-    | { conn: typeof mongoose.connection | null; promise: Promise<typeof mongoose> | null }
+    | { conn: Connection | null; promise: Promise<Connection> | null }
     | undefined;
 }
 
@@ -19,11 +19,11 @@ export async function connectDB() {
   if (cached.conn) return cached.conn;
   if (!cached.promise) {
     cached.promise = mongoose.connect(MONGODB_URI, {
-      dbName: process.env.DB_NAME,
+      dbName: process.env.DB_NAME || undefined,
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       bufferCommands: false,
-    }).then((connection) => connection.connection);
+    }).then(() => mongoose.connection);
   }
   try {
     cached.conn = await cached.promise;
