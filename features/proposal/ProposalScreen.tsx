@@ -50,6 +50,7 @@ export default function ProposalDetailPage() {
     await Promise.all([
       query.refetch(),
       client.invalidateQueries({ queryKey: ["group"] }),
+      client.invalidateQueries({ queryKey: ["proposals"] }),
       client.invalidateQueries({ queryKey: ["history"] }),
       client.invalidateQueries({ queryKey: ["organizations"] }),
       client.invalidateQueries({ queryKey: ["organization"] }),

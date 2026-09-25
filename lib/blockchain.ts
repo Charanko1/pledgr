@@ -1,16 +1,38 @@
 "use client";
 
-import { BrowserProvider, Contract, JsonRpcProvider, JsonRpcSigner } from "ethers";
+import {
+  BrowserProvider,
+  Contract,
+  JsonRpcProvider,
+  JsonRpcSigner,
+} from "ethers";
 import ABI from "@/lib/abi/TrustKasTreasury.json";
+import { BLOCKCHAIN_POLLING_INTERVAL_MS } from "@/lib/realtime";
+
+const DEFAULT_RPC_URL = "https://rpc.bohr.life";
+const DEFAULT_EXPLORER_URL = "https://scan.bohr.life";
+const DEFAULT_CHAIN_ID = 968;
+
+function getConfiguredChainId() {
+  const parsed = Number(process.env.NEXT_PUBLIC_BOT_CHAIN_ID || DEFAULT_CHAIN_ID);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_CHAIN_ID;
+}
+
+function getConfiguredChainIdHex() {
+  return `0x${getConfiguredChainId().toString(16)}`;
+}
 
 export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "";
-export const BOT_CHAIN_ID = "0x3C8";
-export const BOT_RPC_URL = "https://rpc.bohr.life";
-export const BOT_EXPLORER_URL = "https://scan.bohr.life";
+export const BOT_CHAIN_ID = getConfiguredChainIdHex();
+export const BOT_RPC_URL =
+  process.env.NEXT_PUBLIC_BOT_RPC_URL || DEFAULT_RPC_URL;
+export const BOT_EXPLORER_URL =
+  process.env.NEXT_PUBLIC_BOT_EXPLORER_URL || DEFAULT_EXPLORER_URL;
 
 const BOT_CHAIN = {
   chainId: BOT_CHAIN_ID,
-  chainName: "BOT Chain Testnet",
+  chainName:
+    getConfiguredChainId() === 677 ? "BOT Chain Mainnet" : "BOT Chain Testnet",
   nativeCurrency: {
     name: "BOT",
     symbol: "BOT",
@@ -25,7 +47,6 @@ let signer: JsonRpcSigner | null = null;
 let contract: Contract | null = null;
 let readProvider: JsonRpcProvider | null = null;
 let readContract: Contract | null = null;
-
 
 function assertContractAddress() {
   if (!CONTRACT_ADDRESS) {
@@ -82,7 +103,9 @@ export async function getSigner() {
 
   const nextSigner = await p.getSigner();
   const nextAddress = (await nextSigner.getAddress()).toLowerCase();
-  const cachedAddress = signer ? (await signer.getAddress()).toLowerCase() : "";
+  const cachedAddress = signer
+    ? (await signer.getAddress()).toLowerCase()
+    : "";
 
   if (!signer || cachedAddress !== nextAddress) {
     signer = nextSigner;
@@ -107,10 +130,9 @@ export async function getContract() {
 export async function getContractAdmin() {
   assertContractAddress();
 
-  // Reading admin status never needs MetaMask permissions or network switching.
-  const provider = getReadProvider();
-  const contract = new Contract(CONTRACT_ADDRESS, ABI, provider);
-  return (await contract.admin()) as string;
+  // Read-only admin checks never need MetaMask permissions or wallet prompts.
+  const readOnlyContract = getReadContract();
+  return (await readOnlyContract.admin()) as string;
 }
 
 export async function isContractAdmin(address?: string) {
@@ -122,10 +144,16 @@ export async function isContractAdmin(address?: string) {
 export function getReadProvider() {
   if (readProvider) return readProvider;
 
-  readProvider = new JsonRpcProvider(BOT_RPC_URL, {
-    name: "bot-chain-testnet",
-    chainId: 968,
-  }, { staticNetwork: true });
+  readProvider = new JsonRpcProvider(
+    BOT_RPC_URL,
+    {
+      name: `bot-chain-${getConfiguredChainId()}`,
+      chainId: getConfiguredChainId(),
+    },
+    { staticNetwork: true }
+  );
+
+  (readProvider as JsonRpcProvider & { pollingInterval?: number }).pollingInterval = BLOCKCHAIN_POLLING_INTERVAL_MS;
 
   return readProvider;
 }
@@ -141,17 +169,13 @@ export function getReadContract() {
 }
 
 export async function getTreasuryBalance() {
-  const readContract = getReadContract();
-  return readContract.getBalance();
+  const readContractInstance = getReadContract();
+  return readContractInstance.getBalance();
 }
 
 export async function getCampaignOnChain(proposalId: string) {
   assertContractAddress();
-
-  // Read-only campaign data should not require a connected wallet.
-  const provider = getReadProvider();
-  const contract = new Contract(CONTRACT_ADDRESS, ABI, provider);
-  return contract.getCampaign(proposalId);
+  return getReadContract().getCampaign(proposalId);
 }
 
 export function getExplorerTxUrl(txHash: string) {
@@ -163,5 +187,6 @@ export function resetBlockchainCache() {
   signer = null;
   contract = null;
   readContract = null;
+  readProvider?.destroy();
   readProvider = null;
 }

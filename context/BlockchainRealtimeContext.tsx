@@ -41,13 +41,47 @@ async function syncEvent(event: BlockchainEvent) {
       return;
     } catch (error) {
       lastError = error;
-      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+      }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Blockchain event synchronization failed.");
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Blockchain event synchronization failed.");
 }
 
-export function BlockchainRealtimeProvider({ children }: { children: ReactNode }) {
+function invalidateBlockchainRelatedQueries(
+  client: ReturnType<typeof useQueryClient>,
+  event: BlockchainEvent
+) {
+  // These are prefix keys on purpose: only mounted/active queries refetch,
+  // while inactive queries simply receive a stale mark.
+  const keys = [
+    ["proposal", event.proposalId],
+    ["proposals"],
+    ["group"],
+    ["group-members"],
+    ["group-join-requests"],
+    ["history"],
+    ["organizations"],
+    ["organization"],
+    ["organization-groups"],
+    ["organization-members"],
+    ["treasury-balance"],
+  ];
+
+  for (const queryKey of keys) {
+    void client.invalidateQueries({ queryKey });
+  }
+}
+
+export function BlockchainRealtimeProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const client = useQueryClient();
   const [status, setStatus] = useState<
     "connecting" | "connected" | "disconnected" | "disabled"
@@ -58,42 +92,41 @@ export function BlockchainRealtimeProvider({ children }: { children: ReactNode }
     let cancelled = false;
     let cleanup: (() => void) | undefined;
 
-    if (!getRealtimeContract()) {
-      setStatus("disabled");
-      return undefined;
-    }
+    const connect = async () => {
+      if (cancelled) return;
 
-    setStatus("connecting");
+      if (!getRealtimeContract()) {
+        setStatus("disabled");
+        return;
+      }
 
-    void subscribeToTrustKasEvents({
-      onStatus: (nextStatus) => {
-        if (!cancelled) setStatus(nextStatus);
-      },
-      onEvent: (event) => {
-        if (cancelled) return;
-        setLastEventAt(Date.now());
+      setStatus("connecting");
 
-        void syncEvent(event)
-          .catch((error) => {
-            console.error("BLOCKCHAIN REALTIME SYNC ERROR:", error);
-          })
-          .finally(() => {
-            const proposalKey = ["proposal", event.proposalId];
-            void client.invalidateQueries({ queryKey: proposalKey });
-            void client.invalidateQueries({ queryKey: ["group"] });
-            void client.invalidateQueries({ queryKey: ["history"] });
-            void client.invalidateQueries({ queryKey: ["organizations"] });
-            void client.invalidateQueries({ queryKey: ["organization"] });
-            void client.invalidateQueries({ queryKey: ["treasury-balance"] });
-          });
-      },
-    }).then((release) => {
-      if (cancelled) release();
-      else cleanup = release;
-    }).catch((error) => {
-      console.error("BLOCKCHAIN REALTIME SUBSCRIPTION ERROR:", error);
-      if (!cancelled) setStatus("disconnected");
-    });
+      try {
+        cleanup = await subscribeToTrustKasEvents({
+          onStatus: (nextStatus) => {
+            if (!cancelled) setStatus(nextStatus);
+          },
+          onEvent: (event) => {
+            if (cancelled) return;
+            setLastEventAt(Date.now());
+
+            void syncEvent(event)
+              .catch((error) => {
+                console.error("BLOCKCHAIN REALTIME SYNC ERROR:", error);
+              })
+              .finally(() => {
+                invalidateBlockchainRelatedQueries(client, event);
+              });
+          },
+        });
+      } catch (error) {
+        console.error("BLOCKCHAIN REALTIME SUBSCRIPTION ERROR:", error);
+        if (!cancelled) setStatus("disconnected");
+      }
+    };
+
+    void connect();
 
     return () => {
       cancelled = true;
