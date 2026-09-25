@@ -17,67 +17,64 @@ import {
 
 export function useGroup(groupId: string) {
   const client = useQueryClient();
-  const { address, connectWallet } = useWallet();
+  const { address, connectWallet, error: walletError } = useWallet();
+  const key = ["group", groupId];
 
-  const groupQuery = useQuery({
-    queryKey: ["group", groupId],
+  const query = useQuery({
+    queryKey: key,
     enabled: Boolean(groupId),
     refetchInterval: APP_DATA_REFRESH_INTERVAL_MS,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    queryFn: ({ signal }) =>
-      apiClient<GroupData>(`/api/groups/${groupId}`, { signal }),
+    queryFn: async ({ signal }) => {
+      const [group, proposals, members] = await Promise.all([
+        apiClient<GroupData>(`/api/groups/${groupId}`, { signal }),
+        apiClient<Proposal[]>(`/api/proposals?group=${groupId}`, {
+          signal,
+        }),
+        apiClient<Member[]>(`/api/groups/${groupId}/members`, {
+          signal,
+        }),
+      ]);
+
+      return { group, proposals, members };
+    },
   });
 
-  const proposalsQuery = useQuery({
-    queryKey: ["proposals", groupId],
-    enabled: Boolean(groupId),
-    refetchInterval: APP_DATA_REFRESH_INTERVAL_MS,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-    queryFn: ({ signal }) =>
-      apiClient<Proposal[]>(`/api/proposals?group=${groupId}`, { signal }),
-  });
-
-  const membersQuery = useQuery({
-    queryKey: ["group-members", groupId],
-    enabled: Boolean(groupId),
-    refetchInterval: APP_DATA_REFRESH_INTERVAL_MS,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-    queryFn: ({ signal }) =>
-      apiClient<Member[]>(`/api/groups/${groupId}/members`, { signal }),
-  });
-
-  const currentRole = groupQuery.data?.currentRole || "Member";
-
-  const joinRequestsQuery = useQuery({
+  const joinRequests = useQuery({
     queryKey: ["group-join-requests", groupId],
-    enabled: Boolean(groupId) && currentRole === "Admin",
+    enabled:
+      Boolean(groupId) && query.data?.group.currentRole === "Admin",
     refetchInterval: APP_REALTIME_INTERVAL_MS,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     queryFn: ({ signal }) =>
-      apiClient<any[]>(`/api/groups/${groupId}/join-requests`, { signal }),
+      apiClient<any[]>(`/api/groups/${groupId}/join-requests`, {
+        signal,
+      }),
   });
 
   async function refresh() {
     await Promise.all([
-      client.invalidateQueries({ queryKey: ["group", groupId] }),
-      client.invalidateQueries({ queryKey: ["proposals", groupId] }),
-      client.invalidateQueries({ queryKey: ["group-members", groupId] }),
-      client.invalidateQueries({ queryKey: ["group-join-requests", groupId] }),
+      client.invalidateQueries({ queryKey: key }),
       client.invalidateQueries({ queryKey: ["join-requests"] }),
+      client.invalidateQueries({
+        queryKey: ["group-join-requests", groupId],
+      }),
     ]);
   }
 
   async function requireWallet() {
     const current = address || (await connectWallet());
-    if (!current) throw new Error("Connect MetaMask to continue.");
+
+    if (!current) {
+      throw new Error(
+        walletError || "Connect MetaMask to continue."
+      );
+    }
+
     return current;
   }
 
@@ -85,14 +82,19 @@ export function useGroup(groupId: string) {
     const liveAddress = await requireWallet();
     const { getContractAdmin } = await import("@/lib/blockchain");
     const admin = await getContractAdmin();
+
     if (admin.toLowerCase() !== liveAddress.toLowerCase()) {
-      throw new Error("The connected wallet is not the PLEDGR contract admin.");
+      throw new Error(
+        "The connected wallet is not the PLEDGR contract admin."
+      );
     }
+
     return liveAddress;
   }
 
   async function createProposal(data: CreateProposalData) {
     await requireWallet();
+
     await apiClient<Proposal>("/api/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -103,6 +105,7 @@ export function useGroup(groupId: string) {
         groupId,
       }),
     });
+
     await refresh();
   }
 
@@ -114,48 +117,68 @@ export function useGroup(groupId: string) {
       method: "PATCH",
       body: JSON.stringify({ action }),
     });
+
     await refresh();
   }
 
   async function deleteProposal(id: string) {
-    await apiClient(`/api/proposals/${id}`, { method: "DELETE" });
+    await apiClient(`/api/proposals/${id}`, {
+      method: "DELETE",
+    });
+
     await refresh();
   }
 
-  async function validateProposal(id: string, action: "approve" | "reject") {
+  async function validateProposal(
+    id: string,
+    action: "approve" | "reject"
+  ) {
     await apiClient(`/api/proposals/${id}/validation`, {
       method: "PATCH",
       body: JSON.stringify({ action }),
     });
+
     await refresh();
   }
 
-  async function reviewProposal(id: string, action: "approve" | "reject") {
+  async function reviewProposal(
+    id: string,
+    action: "approve" | "reject"
+  ) {
     await apiClient(`/api/proposals/${id}/admin-review`, {
       method: "PATCH",
       body: JSON.stringify({ action }),
     });
+
     await refresh();
   }
 
   async function registerProposalOnChain(id: string) {
-    const liveWallet = await ensureContractAdminWallet();
-    const group = groupQuery.data;
+    const group = query.data?.group;
+
     if (group?.currentRole !== "Admin") {
-      throw new Error("Only a group admin can register a campaign on-chain.");
+      throw new Error(
+        "Only a group admin can register a campaign on-chain."
+      );
     }
 
-    const proposal = proposalsQuery.data?.find((item) => item._id === id);
-    if (!proposal) throw new Error("Proposal not found.");
+    const proposal = query.data?.proposals.find(
+      (item) => item._id === id
+    );
 
-    const validators = (membersQuery.data || [])
+    if (!proposal) {
+      throw new Error("Proposal not found.");
+    }
+
+    const validators = (query.data?.members || [])
       .filter(
         (member) =>
           member.role === "Validator" &&
           member.status === "ACTIVE" &&
           member.walletAddress
       )
-      .map((member) => member.walletAddress!.toLowerCase());
+      .map((member) => member.walletAddress!)
+      .map((value) => value.toLowerCase());
 
     if (!validators.length) {
       throw new Error(
@@ -163,8 +186,6 @@ export function useGroup(groupId: string) {
       );
     }
 
-    const { getContract } = await import("@/lib/blockchain");
-    const targetAtomic = BigInt(proposal.targetAmountAtomic);
     const deadlineSeconds = Math.floor(
       new Date(proposal.deadline).getTime() / 1000
     );
@@ -176,7 +197,11 @@ export function useGroup(groupId: string) {
       throw new Error("The campaign deadline must be in the future.");
     }
 
+    const liveWallet = await ensureContractAdminWallet();
+    const { getContract } = await import("@/lib/blockchain");
+    const targetAtomic = BigInt(proposal.targetAmountAtomic);
     const contract = await getContract();
+
     const tx = await contract.createCampaign(
       id,
       targetAtomic,
@@ -184,6 +209,7 @@ export function useGroup(groupId: string) {
       proposal.recipientWallet,
       validators
     );
+
     await tx.wait();
 
     await apiClient(`/api/proposals/${id}`, {
@@ -194,14 +220,23 @@ export function useGroup(groupId: string) {
         blockchainActorWallet: liveWallet,
       }),
     });
+
     await refresh();
   }
 
   async function activateFunding(id: string) {
+    const group = query.data?.group;
+
+    if (group?.currentRole !== "Admin") {
+      throw new Error("Only a group admin can activate funding.");
+    }
+
     await ensureContractAdminWallet();
+
     const { getContract } = await import("@/lib/blockchain");
     const contract = await getContract();
     const tx = await contract.approveCampaign(id);
+
     await tx.wait();
 
     await apiClient(`/api/proposals/${id}`, {
@@ -211,36 +246,51 @@ export function useGroup(groupId: string) {
         blockchainApprovalTxHash: tx.hash,
       }),
     });
+
     await refresh();
   }
 
   async function requestWithdrawal(id: string) {
-    const proposal = proposalsQuery.data?.find((item) => item._id === id);
-    if (!proposal) throw new Error("Proposal not found.");
+    const proposal = query.data?.proposals.find(
+      (item) => item._id === id
+    );
+
+    if (!proposal) {
+      throw new Error("Proposal not found.");
+    }
 
     if (proposal.status === "Release Rejected") {
       await apiClient(`/api/proposals/${id}/withdraw`, {
         method: "POST",
         body: JSON.stringify({}),
       });
+
       await refresh();
       return;
     }
 
     const liveWallet = await requireWallet();
-    if (liveWallet.toLowerCase() !== proposal.recipientWallet.toLowerCase()) {
-      throw new Error("Connect the fundraiser wallet to request withdrawal.");
+
+    if (
+      liveWallet.toLowerCase() !==
+      proposal.recipientWallet.toLowerCase()
+    ) {
+      throw new Error(
+        "Connect the fundraiser wallet to request withdrawal."
+      );
     }
 
     const { getContract } = await import("@/lib/blockchain");
     const contract = await getContract();
     const tx = await contract.requestWithdrawal(id);
+
     await tx.wait();
 
     await apiClient(`/api/proposals/${id}/withdraw`, {
       method: "POST",
       body: JSON.stringify({ txHash: tx.hash }),
     });
+
     await refresh();
   }
 
@@ -249,84 +299,132 @@ export function useGroup(groupId: string) {
     action: "approve" | "reject",
     note = ""
   ) {
-    const proposal = proposalsQuery.data?.find((item) => item._id === id);
-    if (!proposal) throw new Error("Proposal not found.");
+    const proposal = query.data?.proposals.find(
+      (item) => item._id === id
+    );
+
+    if (!proposal) {
+      throw new Error("Proposal not found.");
+    }
+
+    const group = query.data?.group;
 
     if (action === "reject") {
       if (
         proposal.withdrawalStatus === "ValidatorApproved" &&
-        currentRole === "Admin"
+        group?.currentRole === "Admin"
       ) {
         await ensureContractAdminWallet();
+
         const { getContract } = await import("@/lib/blockchain");
         const contract = await getContract();
         const tx = await contract.resetValidatorReleaseApproval(id);
+
         await tx.wait();
 
-        await apiClient(`/api/proposals/${id}/withdrawal-review`, {
-          method: "PATCH",
-          body: JSON.stringify({ action, note, resetTxHash: tx.hash }),
-        });
+        await apiClient(
+          `/api/proposals/${id}/withdrawal-review`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              action,
+              note,
+              resetTxHash: tx.hash,
+            }),
+          }
+        );
       } else {
-        await apiClient(`/api/proposals/${id}/withdrawal-review`, {
-          method: "PATCH",
-          body: JSON.stringify({ action, note }),
-        });
+        await apiClient(
+          `/api/proposals/${id}/withdrawal-review`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ action, note }),
+          }
+        );
       }
 
       await refresh();
       return;
     }
 
+    const canApproveAsValidator =
+      group?.currentRole === "Validator" &&
+      proposal.withdrawalStatus === "Requested";
+
+    const canApproveAsAdmin =
+      group?.currentRole === "Admin" &&
+      proposal.withdrawalStatus === "ValidatorApproved";
+
+    if (!canApproveAsValidator && !canApproveAsAdmin) {
+      throw new Error(
+        "This withdrawal is not waiting for an approval from your role."
+      );
+    }
+
     await requireWallet();
+
     const { getContract } = await import("@/lib/blockchain");
     const contract = await getContract();
     let tx;
 
-    if (
-      currentRole === "Validator" &&
-      proposal.withdrawalStatus === "Requested"
-    ) {
+    if (canApproveAsValidator) {
       tx = await contract.approveValidatorRelease(id);
       await tx.wait();
-      await apiClient(`/api/proposals/${id}/withdrawal-review`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          action,
-          note,
-          blockchainTxHash: tx.hash,
-          blockchainApprovalType: "validator",
-        }),
-      });
-    } else if (
-      currentRole === "Admin" &&
-      proposal.withdrawalStatus === "ValidatorApproved"
-    ) {
+
+      await apiClient(
+        `/api/proposals/${id}/withdrawal-review`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            action,
+            note,
+            blockchainTxHash: tx.hash,
+            blockchainApprovalType: "validator",
+          }),
+        }
+      );
+    } else {
       tx = await contract.approveAdminRelease(id);
       await tx.wait();
-      await apiClient(`/api/proposals/${id}/withdrawal-review`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          action,
-          note,
-          blockchainTxHash: tx.hash,
-          blockchainApprovalType: "admin",
-        }),
-      });
-    } else {
-      throw new Error("This withdrawal is not waiting for an approval from your role.");
+
+      await apiClient(
+        `/api/proposals/${id}/withdrawal-review`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            action,
+            note,
+            blockchainTxHash: tx.hash,
+            blockchainApprovalType: "admin",
+          }),
+        }
+      );
     }
 
     await refresh();
   }
 
   async function releaseFund(id: string) {
+    const group = query.data?.group;
+
+    if (group?.currentRole !== "Admin") {
+      throw new Error(
+        "Only a group admin can release campaign funds."
+      );
+    }
+
     await ensureContractAdminWallet();
+
     const { getContract } = await import("@/lib/blockchain");
     const contract = await getContract();
     const campaign = await contract.getCampaign(id);
     const amount = BigInt(campaign.totalRaised);
-    if (amount <= 0n) throw new Error("There are no BOT funds available to release.");
+
+    if (amount <= 0n) {
+      throw new Error(
+        "There are no BOT funds available to release."
+      );
+    }
 
     const tx = await contract.releaseFund(id);
     await tx.wait();
@@ -335,23 +433,37 @@ export function useGroup(groupId: string) {
       method: "POST",
       body: JSON.stringify({ txHash: tx.hash }),
     });
+
     await refresh();
   }
 
   async function cancelProposal(id: string) {
-    const proposal = proposalsQuery.data?.find((item) => item._id === id);
-    if (!proposal) throw new Error("Proposal not found.");
+    const proposal = query.data?.proposals.find(
+      (item) => item._id === id
+    );
 
-    if (["RELEASED", "CANCELLED"].includes(proposal.blockchainStatus || "")) {
+    if (!proposal) {
+      throw new Error("Proposal not found.");
+    }
+
+    if (
+      ["RELEASED", "CANCELLED"].includes(
+        proposal.blockchainStatus || ""
+      )
+    ) {
       throw new Error("This proposal is already closed.");
     }
 
     if (
-      ["Withdrawal Requested", "Validator Release Approved", "Release Approved"].includes(
-        proposal.status
-      )
+      [
+        "Withdrawal Requested",
+        "Validator Release Approved",
+        "Release Approved",
+      ].includes(proposal.status)
     ) {
-      throw new Error("This proposal is in withdrawal review and cannot be cancelled.");
+      throw new Error(
+        "This proposal is in withdrawal review and cannot be cancelled."
+      );
     }
 
     if (proposal.blockchainStatus === "PENDING") {
@@ -359,17 +471,38 @@ export function useGroup(groupId: string) {
         method: "POST",
         body: JSON.stringify({}),
       });
+
       await refresh();
       return;
     }
 
+    const isCreator =
+      Boolean(query.data?.group?.currentUserId) &&
+      Boolean(proposal.creatorId) &&
+      String(query.data?.group?.currentUserId) ===
+        String(proposal.creatorId);
+
+    const isGroupAdmin =
+      query.data?.group?.currentRole === "Admin";
+
+    if (!isCreator && !isGroupAdmin) {
+      throw new Error(
+        "Only the fundraiser or group admin can cancel this proposal."
+      );
+    }
+
     const liveWallet = await requireWallet();
-    const { getContract, getContractAdmin } = await import("@/lib/blockchain");
+    const { getContract, getContractAdmin } = await import(
+      "@/lib/blockchain"
+    );
+
     const isFundraiser =
-      proposal.recipientWallet.toLowerCase() === liveWallet.toLowerCase();
+      proposal.recipientWallet.toLowerCase() ===
+      liveWallet.toLowerCase();
 
     if (!isFundraiser) {
       const admin = await getContractAdmin();
+
       if (admin.toLowerCase() !== liveWallet.toLowerCase()) {
         throw new Error(
           "Connect the fundraiser wallet or PLEDGR contract admin wallet to cancel on-chain."
@@ -379,12 +512,14 @@ export function useGroup(groupId: string) {
 
     const contract = await getContract();
     const tx = await contract.cancelCampaign(id);
+
     await tx.wait();
 
     await apiClient(`/api/proposals/${id}/cancel`, {
       method: "POST",
       body: JSON.stringify({ txHash: tx.hash }),
     });
+
     await refresh();
   }
 
@@ -393,6 +528,7 @@ export function useGroup(groupId: string) {
       method: "PATCH",
       body: JSON.stringify({ action: "set-validator" }),
     });
+
     await refresh();
   }
 
@@ -401,6 +537,7 @@ export function useGroup(groupId: string) {
       method: "PATCH",
       body: JSON.stringify({ action: "remove-validator" }),
     });
+
     await refresh();
   }
 
@@ -408,27 +545,27 @@ export function useGroup(groupId: string) {
     await apiClient(`/api/groups/${groupId}/members/${memberId}`, {
       method: "DELETE",
     });
+
     await refresh();
   }
 
-  const group = groupQuery.data;
-  const proposals = proposalsQuery.data || [];
-  const members = membersQuery.data || [];
-  const resolvedRole = currentRole as GroupRole;
+  const group = query.data?.group;
 
   return {
-    loading: groupQuery.isPending || proposalsQuery.isPending || membersQuery.isPending,
-    error: groupQuery.error || proposalsQuery.error || membersQuery.error,
+    loading: query.isPending,
+    error: query.error,
     group,
-    members,
-    proposals,
-    joinRequests: joinRequestsQuery.data || [],
-    currentRole: resolvedRole,
-    isAdmin: resolvedRole === "Admin",
-    isValidator: resolvedRole === "Validator",
+    members: query.data?.members || [],
+    proposals: query.data?.proposals || [],
+    joinRequests: joinRequests.data || [],
+    currentRole: (group?.currentRole || "Member") as GroupRole,
+    isAdmin: group?.currentRole === "Admin",
+    isValidator: group?.currentRole === "Validator",
     createProposal,
-    approveJoinRequest: (id: string) => handleJoinRequest(id, "Approved"),
-    rejectJoinRequest: (id: string) => handleJoinRequest(id, "Rejected"),
+    approveJoinRequest: (id: string) =>
+      handleJoinRequest(id, "Approved"),
+    rejectJoinRequest: (id: string) =>
+      handleJoinRequest(id, "Rejected"),
     deleteProposal,
     validateProposal,
     reviewProposal,
