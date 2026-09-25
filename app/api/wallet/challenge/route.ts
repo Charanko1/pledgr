@@ -1,0 +1,73 @@
+import { randomBytes } from "crypto";
+import { NextRequest, NextResponse } from "next/server";
+import { getAddress, isAddress } from "ethers";
+import { connectDB } from "@/lib/mongodb";
+import { getAuthenticatedUser, AuthenticationError, authErrorResponse } from "@/lib/server-auth";
+import User from "@/models/User";
+import Proposal from "@/models/Proposal";
+import Membership from "@/models/Membership";
+import GroupMember from "@/models/GroupMember";
+import { buildWalletMessage } from "@/lib/wallet-verification";
+import { ACTIVE_PROPOSAL_STATUSES } from "@/lib/proposal-state";
+
+const NONCE_TTL_MS = 10 * 60 * 1000;
+
+export async function POST(req: NextRequest) {
+  try {
+    await connectDB();
+    const user = await getAuthenticatedUser(req);
+    const body = await req.json().catch(() => ({}));
+    const walletAddress = typeof body.walletAddress === "string" ? body.walletAddress.trim() : "";
+
+    if (!isAddress(walletAddress)) {
+      return NextResponse.json({ message: "A valid MetaMask address is required." }, { status: 400 });
+    }
+
+    const normalized = getAddress(walletAddress);
+    const owner = await User.findOne({
+      walletAddress: { $regex: new RegExp(`^${normalized}$`, "i") },
+      _id: { $ne: user._id },
+    }).select("_id").lean();
+
+    if (owner) {
+      return NextResponse.json({ message: "This wallet is already connected to another account." }, { status: 409 });
+    }
+
+    if (user.walletAddress && isAddress(user.walletAddress) && getAddress(user.walletAddress) !== normalized) {
+      const activeProposal = await Proposal.exists({
+        creatorId: user._id,
+        status: { $in: [...ACTIVE_PROPOSAL_STATUSES] },
+      });
+      const userMemberships = await Membership.find({ userId: user._id.toString() }).select("_id").lean();
+      const membershipIds = userMemberships.map((item) => item._id);
+      const validatorMemberships = membershipIds.length
+        ? await GroupMember.find({ membershipId: { $in: membershipIds }, status: "ACTIVE", role: "Validator" }).select("groupId membershipId").lean()
+        : [];
+      if (activeProposal) {
+        return NextResponse.json({ message: "You cannot change your wallet while you have an active fundraising proposal." }, { status: 409 });
+      }
+      if (validatorMemberships.length) {
+        const validatorGroups = validatorMemberships.map((item: any) => item.groupId);
+        const activeValidatorProposal = await Proposal.exists({
+          groupId: { $in: validatorGroups },
+          status: { $in: [...ACTIVE_PROPOSAL_STATUSES] },
+        });
+        if (activeValidatorProposal) return NextResponse.json({ message: "You cannot change your wallet while you are an active validator on groups with proposals in progress." }, { status: 409 });
+      }
+    }
+
+    const nonce = randomBytes(24).toString("hex");
+    user.walletNonce = nonce;
+    user.walletNonceExpiresAt = new Date(Date.now() + NONCE_TTL_MS);
+    await user.save();
+
+    return NextResponse.json({
+      message: buildWalletMessage(normalized, nonce),
+      expiresAt: user.walletNonceExpiresAt,
+    });
+  } catch (error) {
+    if (error instanceof AuthenticationError) return authErrorResponse(error);
+    console.error("WALLET CHALLENGE ERROR:", error);
+    return NextResponse.json({ message: error instanceof Error ? error.message : "Could not create wallet challenge." }, { status: 500 });
+  }
+}
