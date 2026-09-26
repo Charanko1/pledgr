@@ -9,6 +9,7 @@ const ProposalSchema = new Schema(
     availableAmountAtomic: { type: String, default: "0" },
     v2SyncedBlock: { type: Number, default: 0 },
     registration: { type: Schema.Types.Mixed },
+    approvalPolicy: { type: Schema.Types.Mixed },
     title: { type: String, required: true, trim: true, maxlength: 120 },
     description: { type: String, required: true, trim: true, maxlength: 4000 },
     groupId: { type: Schema.Types.ObjectId, ref: "Group", required: true, index: true },

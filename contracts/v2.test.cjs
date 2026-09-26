@@ -1,32 +1,32 @@
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const ganache=require('ganache');
-const {BrowserProvider,ContractFactory,Wallet,parseEther,keccak256,AbiCoder,randomBytes,hexlify}=require('ethers');
+const {BrowserProvider,ContractFactory,Wallet,parseEther,keccak256,AbiCoder,randomBytes,hexlify,ZeroAddress}=require('ethers');
 const {compile}=require('./compile.cjs');
 let chain,provider,accounts,artifact,signers;
 const regTypes={Registration:[{name:'campaignId',type:'bytes32'},{name:'creator',type:'address'},{name:'validator',type:'address'},{name:'reviewerAdmin',type:'address'},{name:'target',type:'uint256'},{name:'deadline',type:'uint256'},{name:'validUntil',type:'uint256'}]};
 const withdrawalTypes={Withdrawal:[{name:'campaignId',type:'bytes32'},{name:'requestId',type:'bytes32'},{name:'creator',type:'address'},{name:'amount',type:'uint256'},{name:'nonce',type:'uint256'},{name:'validUntil',type:'uint256'}]};
 before(async()=>{
   artifact=compile();chain=ganache.provider({logging:{quiet:true},wallet:{totalAccounts:8},chain:{chainId:1337,hardfork:'shanghai'}});
-  provider=new BrowserProvider(chain);provider.pollingInterval=10;
+  provider=new BrowserProvider(chain,undefined,{cacheTimeout:-1});provider.pollingInterval=10;
   accounts=Object.values(chain.getInitialAccounts()).map(a=>new Wallet(a.secretKey));
   signers=await Promise.all(accounts.map((_,i)=>provider.getSigner(i)));
 });
 after(async()=>{provider?.destroy();await chain?.disconnect();});
-async function fixture({target='0.1',deadlineOffset=3600,unlimited=false}={}){
+async function fixture({target='0.1',deadlineOffset=3600,unlimited=false,needsValidator=true,needsAdmin=true}={}){
   const contract=await new ContractFactory(artifact.abi,artifact.evm.bytecode.object,signers[0]).deploy();await contract.waitForDeployment();
   const domain={name:'PledgrTreasury',version:'2',chainId:1337,verifyingContract:await contract.getAddress()};
   const now=Number((await provider.getBlock('latest')).timestamp);
   const proposalId=hexlify(randomBytes(12));
   const creator=accounts[1].address;
   const id=keccak256(AbiCoder.defaultAbiCoder().encode(['address','string'],[creator,proposalId]));
-  const r={campaignId:id,creator,validator:accounts[2].address,reviewerAdmin:accounts[3].address,target:parseEther(target),deadline:unlimited?0:now+deadlineOffset,validUntil:now+86400};
-  const v=await accounts[2].signTypedData(domain,regTypes,r),a=await accounts[3].signTypedData(domain,regTypes,r);
+  const r={campaignId:id,creator,validator:needsValidator?accounts[2].address:ZeroAddress,reviewerAdmin:needsAdmin?accounts[3].address:ZeroAddress,target:parseEther(target),deadline:unlimited?0:now+deadlineOffset,validUntil:now+86400};
+  const v=needsValidator?await accounts[2].signTypedData(domain,regTypes,r):'0x',a=needsAdmin?await accounts[3].signTypedData(domain,regTypes,r):'0x';
   await (await contract.connect(signers[1]).registerCampaign(proposalId,r,v,a)).wait();
   async function authorize(amount='0.04',overrides={},signDomain=domain){
     const c=await contract.getCampaign(id);
     const w={campaignId:id,requestId:hexlify(randomBytes(32)),creator,amount:parseEther(amount),nonce:c.nonce,validUntil:now+86400,...overrides};
-    return {w,v:await accounts[2].signTypedData(signDomain,withdrawalTypes,w),a:await accounts[3].signTypedData(signDomain,withdrawalTypes,w)};
+    return {w,v:needsValidator?await accounts[2].signTypedData(signDomain,withdrawalTypes,w):'0x',a:needsAdmin?await accounts[3].signTypedData(signDomain,withdrawalTypes,w):'0x'};
   }
   async function claim(auth){return (await contract.connect(signers[1]).claim(auth.w,auth.v,auth.a)).wait();}
   async function donate(amount='1'){await (await contract.connect(signers[4]).donate(id,{value:parseEther(amount)})).wait();}
@@ -88,6 +88,36 @@ test('cancellation invalidates claims, enables refunds; partial payouts cannot b
   const f=await fixture();await f.donate();const auth=await f.authorize();
   await (await f.contract.connect(signers[1]).cancel(f.id)).wait();await assert.rejects(f.claim(auth));await assert.rejects(f.donate());
   await (await f.contract.connect(signers[4]).refund(f.id)).wait();assert.equal(await f.contract.available(f.id),0n);
-  await assert.rejects(f.contract.connect(signers[4]).refund(f.id));
+  await assert.rejects(async()=>{await (await f.contract.connect(signers[4]).refund(f.id)).wait();});
   const g=await fixture();await g.donate();await g.claim(await g.authorize());await assert.rejects(g.contract.connect(signers[1]).cancel(g.id));
+});
+
+test('admin creator needs validator only for registration and partial claim',async()=>{
+  const f=await fixture({needsAdmin:false});assert.equal(await f.contract.approvalPolicyVersion(),1n);
+  assert.equal((await f.contract.getCampaign(f.id)).reviewerAdmin,ZeroAddress);
+  await f.donate();const auth=await f.authorize('0.3');
+  await assert.rejects(f.claim({...auth,v:'0x'}));
+  await assert.rejects(f.claim({...auth,a:auth.v}));
+  await assert.rejects(f.contract.connect(signers[2]).claim(auth.w,auth.v,auth.a));
+  await f.claim(auth);assert.equal(await f.contract.available(f.id),parseEther('0.7'));
+});
+
+test('sole validator creator needs admin only; second-validator policy still requires both',async()=>{
+  const f=await fixture({needsValidator:false});assert.equal((await f.contract.getCampaign(f.id)).validator,ZeroAddress);
+  await f.donate();const auth=await f.authorize();await assert.rejects(f.claim({...auth,a:'0x'}));await f.claim(auth);
+  const g=await fixture();await g.donate();const both=await g.authorize();await assert.rejects(g.claim({...both,v:'0x'}));await g.claim(both);
+});
+
+test('registration cannot omit all reviewers, use creator as reviewer, or weaken signed roles',async()=>{
+  await assert.rejects(fixture({needsAdmin:false,needsValidator:false}));
+  const f=await fixture();
+  async function register(overrides,tamper=false){
+    const proposalId=hexlify(randomBytes(12));
+    const r={...f.r,campaignId:await f.contract.campaignKey(f.creator,proposalId),...overrides};
+    const v=await accounts[2].signTypedData(f.domain,regTypes,r),a=await accounts[3].signTypedData(f.domain,regTypes,r);
+    return f.contract.connect(signers[1]).registerCampaign(proposalId,tamper?{...r,reviewerAdmin:ZeroAddress}:r,v,tamper?'0x':a);
+  }
+  await assert.rejects(register({validator:f.creator}));
+  await assert.rejects(register({reviewerAdmin:accounts[2].address}));
+  await assert.rejects(register({},true));
 });

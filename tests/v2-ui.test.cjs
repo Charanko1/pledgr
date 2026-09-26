@@ -14,6 +14,7 @@ function render(overrides={}){
   const mocks={
     '@tanstack/react-query':{useQuery:()=>({data:state,isPending:false}),useQueryClient:()=>({})},
     '@/lib/api-client':{},'@/lib/blockchain':{},'@/lib/v2/client':{},'@/components/ui/ContentState':{},
+    '@/lib/approval-policy':{approvalLabel:p=>p.requireAdmin&&p.requireValidator?'Admin + validator (either order)':p.requireAdmin?'Admin only':'Validator only'},
   };
   const source=ts.transpileModule(fs.readFileSync(path.join(__dirname,'../features/proposal/V2Proposal.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
   const module={exports:{}};
@@ -36,4 +37,20 @@ test('assigned validator gets gas-free signing; ordinary member cannot sign',()=
 test('expired authorization offers fresh request instead of claim',()=>{
   const html=render({withdrawal:{message:{amount:atom},status:'Approved',validUntil:90,requestId:'id',validatorSignature:'signature',adminSignature:'signature'}});
   assert.match(html,/Expired/);assert.match(html,/Request withdrawal/);assert.doesNotMatch(html,/Claim 1 BOT/);
+});
+
+test('admin sees independent approval before validator signs, but never creator actions',()=>{
+  const withdrawal={message:{amount:atom},status:'Requested',validUntil:1000,requestId:'id',validatorSignature:'',adminSignature:''};
+  const html=render({withdrawal,wallet:admin,permissions:{isCreator:false,isAdmin:true,isValidator:false}});
+  assert.match(html,/Sign approval/);assert.doesNotMatch(html,/Request withdrawal|>Claim 1 BOT/);
+  const signed=render({withdrawal:{...withdrawal,status:'AdminApproved',adminSignature:'signed'},wallet:admin,permissions:{isCreator:false,isAdmin:true,isValidator:false}});
+  assert.doesNotMatch(signed,/Sign approval/);
+});
+
+test('creator can register with its single required signature and sees exempt role',()=>{
+  const zero='0x'+'0'.repeat(40);
+  const registration={message:{validator,reviewerAdmin:zero,validUntil:1000},validatorSignature:'signed',adminSignature:''};
+  const html=render({chain:null,registration,proposalStatus:'Approved',policy:{version:1,creatorRole:'Admin',requireAdmin:false,requireValidator:true}});
+  assert.match(html,/Register my campaign/);assert.match(html,/Admin: not required/);assert.match(html,/Validator only/);
+  assert.doesNotMatch(render({chain:null,registration:{...registration,validatorSignature:''}}),/Register my campaign/);
 });

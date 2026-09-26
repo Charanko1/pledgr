@@ -8,6 +8,7 @@ import GroupJoinRequest from "@/models/GroupJoinRequest";
 import History from "@/models/History";
 import User from "@/models/User";
 import Proposal from "@/models/Proposal";
+import { appointValidator } from "@/lib/validator-slots";
 
 async function getAdmin(groupId: string, userId: string) {
   const group = await Group.findById(groupId, "organizationId leaderId name").lean();
@@ -42,11 +43,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (action === "set-validator") {
       const targetUser = await User.findById(targetMembership.userId).select("walletAddress walletVerifiedAt").lean();
       if (!targetUser?.walletAddress || !targetUser.walletVerifiedAt) return NextResponse.json({ message: "The member must verify a MetaMask wallet before becoming a validator." }, { status: 409 });
-      target.role = "Validator";
-      target.assignedAt = new Date();
-      target.removedAt = null;
-      target.removedBy = null;
-      await target.save();
+      try { await appointValidator(id, target._id); }
+      catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "Could not appoint validator." }, { status: 409 }); }
       await History.create({ organizationId: admin.group.organizationId, groupId: admin.group._id, userId: user._id.toString(), type: "VALIDATOR", title: "Validator Appointed", description: `${targetMembership.name} was appointed as a validator in ${admin.group.name}.` });
       return NextResponse.json({ message: "Member is now a validator." });
     }
@@ -63,6 +61,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
 
       target.role = "Member";
+      target.validatorSlot = null;
       target.assignedAt = null;
       await target.save();
       await History.create({ organizationId: admin.group.organizationId, groupId: admin.group._id, userId: user._id.toString(), type: "VALIDATOR", title: "Validator Role Removed", description: `${targetMembership.name} is now a member in ${admin.group.name}.` });
@@ -127,6 +126,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     target.status = "REMOVED";
     target.role = "Member";
+    target.validatorSlot = null;
     target.assignedAt = null;
     target.removedAt = new Date();
     target.removedBy = user._id;

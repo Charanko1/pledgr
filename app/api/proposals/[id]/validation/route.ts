@@ -1,3 +1,4 @@
+import { reviewProposal } from "@/lib/proposal-approval";
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Proposal from "@/models/Proposal";
@@ -17,7 +18,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const proposal = await Proposal.findById(id);
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
-    if (proposal.contractVersion === 2 && (String(proposal.creatorId) === String(user._id) || !user.walletVerifiedAt || !user.walletAddress)) return NextResponse.json({ message: "V2 requires distinct, verified creator, validator and admin accounts." }, { status: 403 });
+    if (proposal.contractVersion === 2) {
+      try { return NextResponse.json({ proposal: await reviewProposal(proposal, user, "validator", action, note), message: "Review recorded." }); }
+      catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "Review failed." }, { status: 409 }); }
+    }
     const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
     if (!access?.isValidator) return NextResponse.json({ message: "Only an active group validator can validate proposals." }, { status: 403 });
     if (proposal.status !== "Pending" || proposal.blockchainStatus !== "PENDING") return NextResponse.json({ message: "Only pending, unregistered proposals can be validated." }, { status: 409 });
@@ -27,12 +31,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     proposal.validatedBy = user._id;
     proposal.validatedAt = new Date();
     proposal.validationNote = note;
-    if (proposal.contractVersion === 2) {
-      const result = await Proposal.updateOne({ _id: proposal._id, status: "Pending", blockchainStatus: "PENDING" }, { $set: {
-        validationStatus: proposal.validationStatus, status: proposal.status, validatedBy: user._id, validatedAt: proposal.validatedAt, validationNote: note,
-      } });
-      if (!result.matchedCount) return NextResponse.json({ message: "Another review already changed this proposal." }, { status: 409 });
-    } else await proposal.save();
+    await proposal.save();
 
     await History.create({ organizationId: access.group.organizationId, groupId: access.group._id, proposalId: proposal._id, userId: user._id.toString(), type: "VALIDATOR", title: action === "approve" ? "Proposal Validated" : "Proposal Rejected by Validator", description: `${proposal.title} was ${action === "approve" ? "validated" : "rejected"} by ${user.name}.` });
     return NextResponse.json({ message: action === "approve" ? "Proposal validated." : "Proposal rejected.", proposal });

@@ -1,3 +1,5 @@
+import { readApprovalPolicy } from "@/lib/proposal-approval";
+import { proposalApproved } from "@/lib/approval-policy";
 import { NextRequest, NextResponse } from "next/server";
 import { getAddress, isHexString } from "ethers";
 import { connectDB } from "@/lib/mongodb";
@@ -33,9 +35,12 @@ export async function GET(req: NextRequest, { params }: Params) {
     const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
     if (!access?.allowed) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
 
+    const policy = proposal.contractVersion === 2 ? await readApprovalPolicy(proposal) : undefined;
     const isCreator = Boolean(proposal.creatorId && String((proposal.creatorId as any)._id || proposal.creatorId) === user._id.toString());
     return NextResponse.json({
       ...serialize(proposal),
+      approvalPolicy: policy,
+      status: policy && ["Pending", "Validated", "Approved"].includes(proposal.status) ? (proposalApproved(policy, proposal) ? "Approved" : "Pending") : proposal.status,
       permissions: {
         isCreator,
         isAdmin: access.isGroupAdmin,

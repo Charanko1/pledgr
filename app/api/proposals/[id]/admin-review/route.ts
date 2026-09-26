@@ -1,3 +1,4 @@
+import { reviewProposal } from "@/lib/proposal-approval";
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Proposal from "@/models/Proposal";
@@ -17,7 +18,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const proposal = await Proposal.findById(id);
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
-    if (proposal.contractVersion === 2 && (String(proposal.creatorId) === String(user._id) || !user.walletVerifiedAt || !user.walletAddress || String(proposal.validatedBy) === String(user._id))) return NextResponse.json({ message: "V2 requires distinct, verified creator, validator and admin accounts." }, { status: 403 });
+    if (proposal.contractVersion === 2) {
+      try { return NextResponse.json({ proposal: await reviewProposal(proposal, user, "admin", action, note), message: "Review recorded." }); }
+      catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "Review failed." }, { status: 409 }); }
+    }
     const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
     if (!access?.isGroupAdmin) return NextResponse.json({ message: "Only a group admin can review proposals." }, { status: 403 });
     if (proposal.status !== "Validated" || proposal.validationStatus !== "Approved" || proposal.blockchainStatus !== "PENDING") return NextResponse.json({ message: "Only validator-approved pending proposals can receive admin approval." }, { status: 409 });
@@ -39,12 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       proposal.approvedBy = user.name;
       proposal.approvedAt = new Date();
     }
-    if (proposal.contractVersion === 2) {
-      const result = await Proposal.updateOne({ _id: proposal._id, status: "Validated", blockchainStatus: "PENDING" }, { $set: {
-        adminReviewStatus: proposal.adminReviewStatus, status: proposal.status, adminReviewedBy: user._id, adminReviewedAt: proposal.adminReviewedAt, adminReviewNote: note, approvedBy: user.name, approvedAt: proposal.approvedAt,
-      } });
-      if (!result.matchedCount) return NextResponse.json({ message: "Another review already changed this proposal." }, { status: 409 });
-    } else await proposal.save();
+    await proposal.save();
     await History.create({ organizationId: access.group.organizationId, groupId: access.group._id, proposalId: proposal._id, userId: user._id.toString(), type: "APPROVAL", title: action === "approve" ? "Proposal Approved" : "Proposal Rejected by Admin", description: `${proposal.title} was ${action === "approve" ? "approved" : "rejected"} by ${user.name}.` });
     return NextResponse.json({ message: action === "approve" ? "Proposal approved." : "Proposal rejected.", proposal });
   } catch (error) {

@@ -1,3 +1,5 @@
+import { readApprovalPolicy, newApprovalPolicy } from "@/lib/proposal-approval";
+import { proposalApproved } from "@/lib/approval-policy";
 import WithdrawalRequest from "@/models/WithdrawalRequest";
 import { v2Configuration } from "@/lib/v2/server";
 import { NextRequest, NextResponse } from "next/server";
@@ -36,10 +38,14 @@ export async function GET(req: NextRequest) {
 
     const proposals = await Proposal.find({ groupId }).sort({ createdAt: -1 }).populate({ path: "creatorId", select: "_id name email", model: User }).lean();
     const v2Ids = proposals.filter((p:any)=>p.contractVersion===2).map((p:any)=>p._id);
-    const pending = v2Ids.length ? await WithdrawalRequest.find({ proposalId:{$in:v2Ids}, status:{$in:["Requested","ValidatorApproved","Approved"]} }).sort({createdAt:-1}).select("proposalId status amount validUntil").lean() : [];
+    const pending = v2Ids.length ? await WithdrawalRequest.find({ proposalId:{$in:v2Ids}, status:{$in:["Requested","ValidatorApproved","AdminApproved","Approved"]} }).sort({createdAt:-1}).select("proposalId status amount validUntil").lean() : [];
     const summaries = new Map<string,any>();
     for(const request of pending) if(!summaries.has(String(request.proposalId))) summaries.set(String(request.proposalId),request);
-    return NextResponse.json(proposals.map((p:any)=>({...serializeProposal(p),v2Withdrawal:summaries.get(String(p._id))||null})));
+    return NextResponse.json(await Promise.all(proposals.map(async(p:any)=>{
+      const policy=p.contractVersion===2?await readApprovalPolicy(p):undefined;
+      const status=policy&&["Pending","Validated","Approved"].includes(p.status)?(proposalApproved(policy,p)?"Approved":"Pending"):p.status;
+      return {...serializeProposal(p),status,approvalPolicy:policy,v2Withdrawal:summaries.get(String(p._id))||null};
+    })));
   } catch (error) {
     if (error instanceof AuthenticationError) return authErrorResponse(error);
     console.error("GET PROPOSALS ERROR:", error);
@@ -74,7 +80,9 @@ export async function POST(req: NextRequest) {
     if (!user.walletAddress || !isAddress(user.walletAddress) || !user.walletVerifiedAt) return NextResponse.json({ message: "Verify your MetaMask wallet before creating a fundraising proposal." }, { status: 400 });
 
     const config = v2Configuration();
+    const approvalPolicy = await newApprovalPolicy(groupId, String(user._id));
     const proposal = await Proposal.create({
+      approvalPolicy,
       contractVersion: 2, contractAddress: config.address, chainId: config.chainId, unlimited,
       title,
       description,

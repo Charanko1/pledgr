@@ -14,17 +14,32 @@ Keep the existing `NEXT_PUBLIC_CONTRACT_ADDRESS` / `TRUSTKAS_CONTRACT_ADDRESS` v
 
 No live deployment or wallet transfer was performed during development. New campaigns use V2; existing funds are not automatically migrated. An old campaign cannot be converted into V2 by editing its database record.
 
+### Role-based revision
+
+Deploy the revised source even if an earlier V2 is already deployed. The revised contract exposes `approvalPolicyVersion() = 1` and supports an exempt reviewer role. The previous V2 bytecode always requires two signatures and cannot implement the single-reviewer cases.
+
+After updating the address setting, preparing registration can move an **unsigned, unregistered** draft from the old V2 address to the revised deployment. Signed registrations and funded campaigns retain their original address and reviewer requirements. No existing funds are moved. Restart Next.js after installing these changes so cached Mongoose models include the new fields and statuses.
+
+| Proposal creator | Required proposal and withdrawal approvals |
+| --- | --- |
+| Organization/group admin | One other validator |
+| Only validator in group | Admin |
+| Validator in a group with two validators | Admin and the other validator |
+| Regular member | Admin and one validator |
+
+Only the proposal creator may request or claim funds. Required approvals can arrive in either order, with no self-approval. Requirements are captured when a new proposal is created; later role appointments do not silently change the policy. Old unsigned drafts derive a policy on their first review/preparation. Group admins may appoint at most two active validators, enforced with two unique database slots. Existing groups above the limit need manual review; nobody is automatically demoted.
+
 ## Workflow
 
 1. Creator submits a proposal, including a target and optional unlimited deadline.
-2. Existing application validator/admin proposal reviews select the two reviewers. Creator, validator and admin must be distinct verified wallets/accounts.
-3. In the proposal detail screen, prepare registration. The selected validator and admin sign the registration terms without gas. This prevents a creator changing reviewer identities or terms without their consent.
+2. Application proposal reviews select the required reviewers according to the table above. Reviewers must use verified wallets distinct from the creator and from each other. Either required role may approve first.
+3. In the proposal detail screen, prepare registration. The selected required reviewers sign the registration terms without gas, in either order. An exempt role is encoded as the zero address and an empty signature. Required signatures cover these reviewer addresses, preventing a creator changing the approved policy or terms.
 4. The creator submits `registerCampaign`. Funding opens immediately; there is no separate on-chain admin activation.
 5. Donations remain open after targets, deadlines, and partial/full claims, until the creator explicitly cancels an unwithdrawn campaign.
 6. Once eligible, the creator enters an exact BOT amount and requests withdrawal through the API. This action needs no wallet transaction or signature.
-7. The assigned validator signs the withdrawal using EIP-712, followed by the assigned admin. Approval costs no gas.
-8. The creator clicks **Claim X BOT**. One transaction verifies both signatures, consumes the nonce, updates total withdrawn, and transfers exactly the approved amount to the creator.
-9. A later partial withdrawal requires a fresh request and both signatures. The already-approved amount cannot be edited at claim time.
+7. The assigned required reviewers sign the withdrawal using EIP-712 in either order. Approval costs no gas. With only one required role, its signature completes approval.
+8. The creator clicks **Claim X BOT**. One transaction verifies all required signatures, consumes the nonce, updates total withdrawn, and transfers exactly the approved amount to the creator.
+9. A later partial withdrawal requires a fresh request and all required signatures. The already-approved amount cannot be edited at claim time.
 
 The claim is the **only transaction in the withdrawal request/review/claim flow**. Registration, donations, public target/deadline updates, cancellation and donor refunds remain ordinary blockchain transactions. EIP-712 signing still opens a wallet **signature** prompt; it cannot be made prompt-free in MetaMask while retaining explicit wallet consent. No private keys are held by the backend.
 
@@ -45,7 +60,7 @@ Registration binds campaign ID, creator, reviewer addresses, target, deadline an
 
 Withdrawal binds campaign ID, random request ID, creator recipient, exact amount, nonce and expiration. The EIP-712 domain binds version 2, chain ID and verifying contract. Nonces increment on successful claims; expired/replayed/wrong-amount/wrong-recipient/wrong-network/wrong-contract signatures fail. OpenZeppelin EIP712, ECDSA and ReentrancyGuard are used.
 
-The contract has no on-chain organization membership directory. Its two reviewer addresses are immutable, distinct, public campaign configuration; both must authorize registration. The app checks that they are the actual approved group reviewers and rechecks active membership when accepting withdrawal signatures. Reviewers losing their application roles can block future approval collection: maintain these assignments for active campaigns. The contract does not read later database role changes, and already issued signatures remain valid until their expiration or nonce consumption/campaign cancellation. Off-chain rejection is allowed only before both approvals are complete; it cannot revoke an already published, fully signed permit.
+The contract has no on-chain organization membership directory. Its required reviewer addresses are immutable, distinct, public campaign configuration, with at least one reviewer; every nonzero reviewer must authorize registration. The app checks that these are the actual approved group reviewers and rechecks active membership when accepting withdrawal signatures. The contract itself authenticates the configured signers, not database roles. Reviewers losing their application roles can block future approval collection: maintain these assignments for active campaigns. The contract does not read later database role changes, and already issued signatures remain valid until their expiration or nonce consumption/campaign cancellation. A reviewer may reject before giving their own signature and before all approvals are complete; rejection cannot revoke an already published, fully signed permit.
 
 Requests/registration authorizations expire after 24 hours. Request updates use compare-and-set conditions and a unique proposal/nonce index. Rejected or expired requests require a new request ID and fresh signatures. Confirmed transaction retries preserve hashes locally; the receipt synchronization form can repair an interrupted API sync without resending funds. Synchronization verifies successful receipts, target contract, campaign ID, creator and reviewers, and records monotonic balance snapshots.
 
@@ -64,7 +79,7 @@ From the project root:
 npm ci --prefix contracts
 npm run build --prefix contracts
 npm test --prefix contracts
-node --test tests/v2-backend.test.cjs tests/v2-ui.test.cjs tests/release-flow.test.cjs
+node --test tests/approval-policy.test.cjs tests/validator-slots.test.cjs tests/v2-backend.test.cjs tests/v2-ui.test.cjs tests/release-flow.test.cjs
 npx tsc --noEmit --incremental false
 npm run build -- --webpack
 ```

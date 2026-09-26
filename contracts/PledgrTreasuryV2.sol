@@ -52,6 +52,9 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
 
     constructor() EIP712("PledgrTreasury", "2") {}
 
+    /// @notice Zero reviewer addresses denote roles exempt under the signed policy.
+    function approvalPolicyVersion() external pure returns (uint256) { return 1; }
+
     function campaignKey(address creator, string calldata proposalId) public pure returns (bytes32) {
         return keccak256(abi.encode(creator, proposalId));
     }
@@ -59,13 +62,12 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
     function registerCampaign(string calldata proposalId, Registration calldata r, bytes calldata validatorSignature, bytes calldata adminSignature) external {
         require(bytes(proposalId).length > 0 && r.campaignId == campaignKey(msg.sender, proposalId), "Invalid campaign ID");
         require(r.creator == msg.sender && campaigns[r.campaignId].creator == address(0), "Creator or campaign invalid");
-        require(r.validator != address(0) && r.reviewerAdmin != address(0), "Missing reviewers");
+        require(r.validator != address(0) || r.reviewerAdmin != address(0), "Missing reviewers");
         require(r.validator != r.reviewerAdmin && r.validator != r.creator && r.reviewerAdmin != r.creator, "Distinct reviewers required");
         require(r.target > 0 && (r.deadline == 0 || r.deadline > block.timestamp), "Invalid terms");
         require(block.timestamp <= r.validUntil, "Authorization expired");
         bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(REGISTRATION_TYPEHASH, r)));
-        require(ECDSA.recover(digest, validatorSignature) == r.validator, "Invalid validator signature");
-        require(ECDSA.recover(digest, adminSignature) == r.reviewerAdmin, "Invalid admin signature");
+        _verifyReviewers(digest, r.validator, r.reviewerAdmin, validatorSignature, adminSignature);
         campaigns[r.campaignId] = Campaign(r.creator, r.validator, r.reviewerAdmin, r.target, r.deadline, 0, 0, 0, 0, false, false);
         emit CampaignRegistered(r.campaignId, msg.sender);
     }
@@ -105,8 +107,7 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
         require(w.amount > 0 && w.amount <= available(w.campaignId), "Invalid amount");
         require(w.nonce == c.nonce && block.timestamp <= w.validUntil, "Used or expired authorization");
         bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(WITHDRAWAL_TYPEHASH, w)));
-        require(ECDSA.recover(digest, validatorSignature) == c.validator, "Invalid validator signature");
-        require(ECDSA.recover(digest, adminSignature) == c.reviewerAdmin, "Invalid admin signature");
+        _verifyReviewers(digest, c.validator, c.reviewerAdmin, validatorSignature, adminSignature);
         c.unlocked = true;
         c.nonce++;
         c.totalWithdrawn += w.amount;
@@ -131,6 +132,12 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
         (bool success,) = payable(msg.sender).call{value: amount}("");
         require(success, "Refund failed");
         emit Refunded(id, msg.sender, amount);
+    }
+    function _verifyReviewers(bytes32 digest, address validator, address reviewerAdmin, bytes calldata validatorSignature, bytes calldata adminSignature) private pure {
+        if (validator == address(0)) require(validatorSignature.length == 0, "Validator not required");
+        else require(ECDSA.recover(digest, validatorSignature) == validator, "Invalid validator signature");
+        if (reviewerAdmin == address(0)) require(adminSignature.length == 0, "Admin not required");
+        else require(ECDSA.recover(digest, adminSignature) == reviewerAdmin, "Invalid admin signature");
     }
     function _campaign(bytes32 id) private view returns (Campaign storage c) {
         c = campaigns[id];

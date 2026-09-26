@@ -1,8 +1,9 @@
 "use client";
 
+import { approvalLabel, type ApprovalPolicy } from "@/lib/approval-policy";
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatEther, getAddress, parseEther } from "ethers";
+import { formatEther, getAddress, parseEther, ZeroAddress } from "ethers";
 import { apiClient } from "@/lib/api-client";
 import { getSigner, getExplorerTxUrl } from "@/lib/blockchain";
 import { v2Transaction } from "@/lib/v2/client";
@@ -11,6 +12,8 @@ import type { Proposal } from "@/types/group";
 import type { TypedDataDomain, TypedDataField } from "ethers";
 
 type State = {
+  policy?: ApprovalPolicy;
+  proposalStatus?: string;
   domain: TypedDataDomain;
   registrationTypes: Record<string,TypedDataField[]>;
   withdrawalTypes: Record<string,TypedDataField[]>;
@@ -24,6 +27,8 @@ const button="pledgr-action px-4 py-2 bg-primary text-white";
 const input="mt-2 w-full border-2 border-foreground bg-white p-3";
 const panel="border-2 border-foreground bg-card p-6 shadow-brutal space-y-4";
 const same=(a?:string,b?:string)=>Boolean(a&&b&&a.toLowerCase()===b.toLowerCase());
+const required=(wallet:string)=>!same(wallet,ZeroAddress);
+const signatureStatus=(wallet:string,signature:string)=>!required(wallet)?"not required":signature?"signed":"awaiting signature";
 
 export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
   const client=useQueryClient();
@@ -53,6 +58,11 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
   if(query.error||!query.data)return <ErrorState message={query.error?.message||"Campaign unavailable."} onRetry={()=>void query.refetch()}/>;
   const s=query.data,c=s.chain,r=s.registration,w=s.withdrawal;
   const creator=s.permissions.isCreator;
+  const policy=s.policy || {version:0,creatorRole:"Member" as const,requireAdmin:true,requireValidator:true};
+  const proposalStatus=s.proposalStatus || p.status;
+  const contractAddress=String(s.domain.verifyingContract || p.contractAddress);
+  const claimPolicy=c?{...policy,requireValidator:required(c.validator),requireAdmin:required(c.reviewerAdmin)}:policy;
+  const registrationReady=Boolean(r&&(!required(r.message.validator)||r.validatorSignature)&&(!required(r.message.reviewerAdmin)||r.adminSignature));
   const expired=Boolean(w&&w.validUntil<=Math.max(s.serverTime,c?.timestamp||0));
   const registrationExpired=Boolean(r&&r.message.validUntil<=s.serverTime);
   const canRequest=Boolean(c?.eligible&&BigInt(c.available)>0n&&(!w||w.status==="Rejected"||expired));
@@ -78,12 +88,12 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
   async function register() {
     if(!r)return;
     await signer(p.recipientWallet);
-    await v2Transaction(p._id,p.contractAddress!,"register",contract=>contract.registerCampaign(p._id,r.message,r.validatorSignature,r.adminSignature));
+    await v2Transaction(p._id,contractAddress,"register",contract=>contract.registerCampaign(p._id,r.message,r.validatorSignature||"0x",r.adminSignature||"0x"));
   }
   async function claim() {
     if(!w||!c)return;
     await signer(c.creator);
-    await v2Transaction(p._id,p.contractAddress!,`claim:${w.message.nonce}`,contract=>contract.claim(w.message,w.validatorSignature,w.adminSignature));
+    await v2Transaction(p._id,contractAddress,`claim:${w.message.nonce}`,contract=>contract.claim(w.message,w.validatorSignature||"0x",w.adminSignature||"0x"));
   }
   async function updateTerms() {
     if(!c)return;
@@ -95,22 +105,23 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
     await v2Transaction(p._id,p.contractAddress!,"terms",contract=>contract.updateTerms(c.campaignId,nextTarget,nextDeadline));
     setTarget("");setDeadline("");setUnlimited(false);
   }
-  const awaitingReviewer=Boolean(w&&!expired&&((reviewerRole==="validator"&&w.status==="Requested")||(reviewerRole==="admin"&&w.status==="ValidatorApproved")));
+  const awaitingReviewer=Boolean(!creator&&w&&!expired&&["Requested","ValidatorApproved","AdminApproved"].includes(w.status)&&reviewerRole&&!(reviewerRole==="validator"?w.validatorSignature:w.adminSignature));
   return <div className="space-y-6">
     <header className="pledgr-hero p-6 space-y-3"><p className="pledgr-eyebrow">Community funding · V2</p><h1 className="text-3xl font-bold">{p.title}</h1><p>{p.description}</p><p className="text-sm break-all">Creator: {p.creator} · {p.recipientWallet}</p></header>
     {message&&<p role="status" className="border-2 border-foreground bg-lime p-4 break-words">{message}</p>}
     <fieldset disabled={busy} aria-busy={busy} className="space-y-6 min-w-0">
       {!c&&<section className={panel}>
         <h2 className="text-xl font-bold">Creator registration</h2>
-        <p>Proposal status: {p.status}. Validator and admin authorize the campaign without gas. The creator then registers it in one transaction; funding opens immediately.</p>
+        <p>Proposal status: {proposalStatus}. Required approvals: {approvalLabel(policy)}. Required reviewers authorize the campaign without gas. The creator then registers it in one transaction; funding opens immediately.</p>
         <div className="flex flex-wrap gap-3">
-          {p.status==="Pending"&&s.permissions.isValidator&&<button className={button} onClick={()=>void run(()=>apiClient(`/api/proposals/${p._id}/validation`,{method:"PATCH",body:JSON.stringify({action:"approve"})}))}>Validate proposal</button>}
-          {p.status==="Validated"&&s.permissions.isAdmin&&<button className={button} onClick={()=>void run(()=>apiClient(`/api/proposals/${p._id}/admin-review`,{method:"PATCH",body:JSON.stringify({action:"approve"})}))}>Approve proposal</button>}
-          {p.status==="Approved"&&(!r||registrationExpired)&&<button className={button} onClick={()=>void run(()=>post({action:"prepareRegistration"}))}>{r?"Renew registration authorization":"Prepare registration"}</button>}
+          {["Pending","Validated"].includes(proposalStatus)&&!creator&&policy.requireValidator&&p.validationStatus!=="Approved"&&s.permissions.isValidator&&<button className={button} onClick={()=>void run(()=>apiClient(`/api/proposals/${p._id}/validation`,{method:"PATCH",body:JSON.stringify({action:"approve"})}))}>Validate proposal</button>}
+          {["Pending","Validated"].includes(proposalStatus)&&!creator&&policy.requireAdmin&&p.adminReviewStatus!=="Approved"&&s.permissions.isAdmin&&<button className={button} onClick={()=>void run(()=>apiClient(`/api/proposals/${p._id}/admin-review`,{method:"PATCH",body:JSON.stringify({action:"approve"})}))}>Approve proposal</button>}
+          {proposalStatus==="Approved"&&(!r||registrationExpired)&&<button className={button} onClick={()=>void run(()=>post({action:"prepareRegistration"}))}>{r?"Renew registration authorization":"Prepare registration"}</button>}
           {r&&!registrationExpired&&reviewerRole&&!(reviewerRole==="validator"?r.validatorSignature:r.adminSignature)&&<button className={button} onClick={()=>void run(signRegistration,"Registration signature saved. No gas charged.")}>Sign as {reviewerRole} · no gas</button>}
-          {r&&!registrationExpired&&creator&&r.validatorSignature&&r.adminSignature&&<button className={button} onClick={()=>void run(register,"Campaign registered. Donations are open.")}>Register my campaign</button>}
+          {r&&!registrationExpired&&creator&&registrationReady&&<button className={button} onClick={()=>void run(register,"Campaign registered. Donations are open.")}>Register my campaign</button>}
         </div>
-        {r&&<p className="text-sm">Validator: {r.validatorSignature?"signed":"awaiting signature"} · Admin: {r.adminSignature?"signed":"awaiting signature"}. Authorization expires {new Date(r.message.validUntil*1000).toLocaleString()}.</p>}
+        {creator&&<p className="text-sm">As the creator, you register the campaign and request and claim its funds. Other required reviewers approve it.</p>}
+        {r&&<p className="text-sm">Validator: {signatureStatus(r.message.validator,r.validatorSignature)} · Admin: {signatureStatus(r.message.reviewerAdmin,r.adminSignature)}. Authorization expires {new Date(r.message.validUntil*1000).toLocaleString()}.</p>}
       </section>}
       {c&&<>
         <section className={panel}><h2 className="text-xl font-bold">Funding overview</h2>
@@ -123,13 +134,13 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
           <button className={button} onClick={()=>void run(async()=>{const value=parseEther(donation);if(value<=0n)throw new Error("Enter a positive amount.");await v2Transaction(p._id,p.contractAddress!,"donate",contract=>contract.donate(c.campaignId,{value}));},"Donation confirmed.")}>Donate BOT</button>
         </section>}
         {!c.cancelled&&<section className={panel}><h2 className="text-xl font-bold">Partial withdrawal</h2>
-          <p>Request an exact amount. A validator and admin sign it without gas. The creator submits one claim transaction to receive that amount.</p>
+          <p>Only the creator can request and claim an exact amount. Required approvals: {approvalLabel(claimPolicy)}. Reviewers sign without gas, in either order. The creator then submits one claim transaction.</p>
           {!c.eligible&&<p>Withdrawal unlocks when the target is met or a dated campaign reaches its deadline. Unlimited campaigns unlock at the target.</p>}
           {creator&&canRequest&&<div className="space-y-3"><label className="block">Amount to withdraw (BOT)<input className={input} inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder={`Up to ${formatEther(c.available)}`}/></label><button className={button} onClick={()=>void run(()=>post({action:"requestWithdrawal",amount}),"Withdrawal requested. No wallet transaction needed.")}>Request withdrawal · no gas</button></div>}
           {w&&<div className="border-2 border-foreground bg-white p-4 space-y-3">
             <p className="font-bold">{formatEther(w.message.amount)} BOT · {expired?"Expired":w.status}</p>
-            <p className="text-sm">Validator: {w.validatorSignature?"signed":"pending"} · Admin: {w.adminSignature?"signed":"pending"}. Expires {new Date(w.validUntil*1000).toLocaleString()}.</p>
-            <p className="text-sm">This amount is fixed for both signatures. Each later withdrawal needs a new request and signatures.</p>
+            <p className="text-sm">Validator: {signatureStatus(c.validator,w.validatorSignature)} · Admin: {signatureStatus(c.reviewerAdmin,w.adminSignature)}. Expires {new Date(w.validUntil*1000).toLocaleString()}.</p>
+            <p className="text-sm">This amount is fixed for all required signatures. Each later withdrawal needs a new request and signatures.</p>
             {awaitingReviewer&&<div className="flex flex-wrap gap-3"><button className={button} onClick={()=>void run(signWithdrawal,"Approval signed. No gas charged.")}>Sign approval · no gas</button><button className="pledgr-action px-4 py-2 bg-red-600 text-white" onClick={()=>void run(()=>post({action:"reviewWithdrawal",requestId:w.requestId,role:reviewerRole,reject:true}),"Request rejected.")}>Reject request</button></div>}
             {creator&&w.status==="Approved"&&!expired&&<button className={button} onClick={()=>void run(claim,"Claim confirmed. BOT was sent to the creator wallet.")}>Claim {formatEther(w.message.amount)} BOT</button>}
           </div>}

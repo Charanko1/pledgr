@@ -1,3 +1,5 @@
+import { readApprovalPolicy } from "@/lib/proposal-approval";
+import { proposalApproved } from "@/lib/approval-policy";
 import { NextRequest, NextResponse } from "next/server";
 import { getAddress, parseEther } from "ethers";
 import { connectDB } from "@/lib/mongodb";
@@ -26,10 +28,12 @@ function errorResponse(error: unknown) {
 export async function GET(req: NextRequest,{params}:Params) {
   try {
     const {user,p,access}=await context(req,params);
+    const policy=await readApprovalPolicy(p);
     const c=await chainSnapshot(p);
     const w=c?await WithdrawalRequest.findOne({proposalId:p._id,nonce:c.nonce}).lean():null;
     const registration=p.registration?.validUntil?{message:registrationMessage(p),validatorSignature:p.registration.validatorSignature,adminSignature:p.registration.adminSignature}:null;
     return NextResponse.json({
+      policy, proposalStatus: ["Pending","Validated","Approved"].includes(p.status) ? (proposalApproved(policy,p)?"Approved":"Pending") : p.status,
       domain:domainFor(p),registrationTypes,withdrawalTypes,registration,chain:c,
       withdrawal:w?{...w,message:withdrawalMessage(w)}:null,
       permissions:{isCreator:String(p.creatorId)===String(user._id),isValidator:access.isValidator,isAdmin:access.isGroupAdmin},

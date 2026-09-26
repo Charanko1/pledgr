@@ -10,7 +10,7 @@ const schema = new Schema({
   validUntil: { type: Number, required: true },
   validatorSignature: { type: String, default: "" },
   adminSignature: { type: String, default: "" },
-  status: { type: String, enum: ["Requested", "ValidatorApproved", "Approved", "Rejected", "Claimed"], default: "Requested" },
+  status: { type: String, enum: ["Requested", "ValidatorApproved", "AdminApproved", "Approved", "Rejected", "Claimed"], default: "Requested" },
   claimTxHash: { type: String, default: "" },
 }, { timestamps: true });
 schema.index({ proposalId: 1, nonce: 1 }, { unique: true });

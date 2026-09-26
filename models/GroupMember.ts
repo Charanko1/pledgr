@@ -5,6 +5,7 @@ const GroupMemberSchema = new Schema(
     groupId: { type: Schema.Types.ObjectId, ref: "Group", required: true, index: true },
     membershipId: { type: Schema.Types.ObjectId, ref: "Membership", required: true, index: true },
     role: { type: String, enum: ["Admin", "Validator", "Member"], default: "Member" },
+    validatorSlot: { type: Number, enum: [1, 2], default: null },
     status: { type: String, enum: ["ACTIVE", "REMOVED"], default: "ACTIVE", index: true },
     assignedAt: { type: Date, default: null },
     removedAt: { type: Date, default: null },
@@ -16,6 +17,11 @@ const GroupMemberSchema = new Schema(
 GroupMemberSchema.index(
   { groupId: 1, membershipId: 1 },
   { unique: true, partialFilterExpression: { status: "ACTIVE" } }
+);
+
+GroupMemberSchema.index(
+  { groupId: 1, validatorSlot: 1 },
+  { unique: true, partialFilterExpression: { status: "ACTIVE", role: "Validator", validatorSlot: { $type: "number" } } }
 );
 
 export default models.GroupMember || mongoose.model("GroupMember", GroupMemberSchema);

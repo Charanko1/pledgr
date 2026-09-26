@@ -13,10 +13,12 @@ interface Props {
 
 export default function MemberBoard({ members, currentRole, onSetValidator, onRemoveValidator, onRemoveMember }: Props) {
   const canManage = currentRole === "Admin";
+  const validatorCount = members.filter(member => member.role === "Validator" && member.status === "ACTIVE").length;
   if (!members.length) return <div className="bg-white border p-8 text-center shadow-brutal">No active members.</div>;
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-gray-600">Validators: {validatorCount} / 2</p>
       {members.map((member) => (
         <div key={member.membershipId} className="bg-white border p-4 flex flex-wrap gap-4 justify-between items-center shadow-brutal">
           <div className="flex gap-4 items-center min-w-0">
@@ -36,7 +38,7 @@ export default function MemberBoard({ members, currentRole, onSetValidator, onRe
                   <ShieldOff size={16} /> Remove Validator
                 </button>
               ) : (
-                <button onClick={() => onSetValidator(member.membershipId)} className="inline-flex items-center gap-2 border-2 border-foreground px-3 py-2 bg-primary text-white hover:bg-primary-hover shadow-brutal">
+                <button disabled={validatorCount >= 2} title={validatorCount >= 2 ? "Each group can have at most two validators." : undefined} onClick={() => onSetValidator(member.membershipId)} className="inline-flex items-center gap-2 border-2 border-foreground px-3 py-2 bg-primary text-white hover:bg-primary-hover shadow-brutal disabled:opacity-50">
                   <ShieldCheck size={16} /> Make Validator
                 </button>
               )}

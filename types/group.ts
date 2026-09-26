@@ -1,3 +1,4 @@
+import type { ApprovalPolicy } from "@/lib/approval-policy";
 export type GroupRole = "Admin" | "Validator" | "Member";
 
 export interface Member {
@@ -42,7 +43,8 @@ export type ProposalStatus =
   | "Released";
 
 export interface Proposal {
-  v2Withdrawal?: { status: "Requested" | "ValidatorApproved" | "Approved"; amount: string; validUntil: number } | null;
+  approvalPolicy?: ApprovalPolicy;
+  v2Withdrawal?: { status: "Requested" | "ValidatorApproved" | "AdminApproved" | "Approved"; amount: string; validUntil: number } | null;
   contractVersion?: number;
   contractAddress?: string;
   chainId?: number;
