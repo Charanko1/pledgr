@@ -51,6 +51,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ message: "Member is now a validator." });
     }
     if (action === "remove-validator") {
+      const activeOnChainProposal = await Proposal.exists({
+        groupId: id,
+        blockchainStatus: { $in: ["CREATED", "APPROVED"] },
+      });
+      if (activeOnChainProposal) {
+        return NextResponse.json(
+          { message: "This validator is locked while the group has an active blockchain campaign. Cancel or release the campaign first." },
+          { status: 409 }
+        );
+      }
+
       target.role = "Member";
       target.assignedAt = null;
       await target.save();
@@ -79,6 +90,29 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (!targetMembership) return NextResponse.json({ message: "Member account not found." }, { status: 404 });
     if (String(targetMembership.userId) === user._id.toString()) return NextResponse.json({ message: "You cannot remove yourself from the group." }, { status: 400 });
     if (target.role === "Admin") return NextResponse.json({ message: "The group admin cannot be removed from this group." }, { status: 400 });
+
+    const activeOwnedProposal = await Proposal.exists({
+      groupId: id,
+      creatorId: targetMembership.userId,
+      blockchainStatus: { $in: ["CREATED", "APPROVED"] },
+    });
+    if (activeOwnedProposal) {
+      return NextResponse.json(
+        { message: "This member owns an active blockchain fundraising proposal and cannot be removed until it is cancelled or released." },
+        { status: 409 }
+      );
+    }
+
+    const activeOnChainProposal = await Proposal.exists({
+      groupId: id,
+      blockchainStatus: { $in: ["CREATED", "APPROVED"] },
+    });
+    if (target.role === "Validator" && activeOnChainProposal) {
+      return NextResponse.json(
+        { message: "This validator cannot be removed while the group has an active blockchain campaign. Cancel or release the campaign first." },
+        { status: 409 }
+      );
+    }
 
     if (target.role === "Validator") {
       const remainingValidators = await GroupMember.countDocuments({ groupId: id, status: "ACTIVE", role: "Validator", _id: { $ne: target._id } });

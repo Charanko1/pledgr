@@ -32,6 +32,23 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ message: "You cannot leave this organization while you own an active blockchain fundraising proposal. Cancel or release the proposal first." }, { status: 409 });
     }
 
+    const validatorGroups = await GroupMember.find({
+      membershipId: membership._id,
+      groupId: { $in: groupIds },
+      status: "ACTIVE",
+      role: "Validator",
+    }).select("groupId").lean();
+    const validatorGroupIds = validatorGroups.map((item) => item.groupId);
+    if (validatorGroupIds.length) {
+      const activeValidatorProposal = await Proposal.exists({
+        groupId: { $in: validatorGroupIds },
+        blockchainStatus: { $in: ["CREATED", "APPROVED"] },
+      });
+      if (activeValidatorProposal) {
+        return NextResponse.json({ message: "You cannot leave this organization while you are an active validator for a group with an active blockchain campaign. Cancel or release the campaign first." }, { status: 409 });
+      }
+    }
+
     if (groupIds.length) {
       await GroupMember.deleteMany({ groupId: { $in: groupIds }, membershipId: membership._id });
       await GroupJoinRequest.deleteMany({ groupId: { $in: groupIds }, membershipId: membership._id });

@@ -71,6 +71,13 @@ export default function ProposalDetailPage() {
   const isReleased = proposal.status === "Released" || proposal.blockchainStatus === "RELEASED";
   const finished = BigInt(proposal.fundedAmountAtomic || "0") >= BigInt(proposal.targetAmountAtomic || "0") || new Date(proposal.deadline).getTime() <= Date.now();
   const fundingOpen = proposal.status === "Funding" && proposal.blockchainStatus === "APPROVED" && !finished && !isCancelled && !isReleased;
+  const withdrawalEligible =
+    proposal.blockchainStatus === "APPROVED" &&
+    ["Funding", "Release Rejected"].includes(proposal.status) &&
+    finished &&
+    permissions.isCreator &&
+    !isCancelled &&
+    !isReleased;
   const percentage = fundingPercentage(proposal.fundedAmountAtomic || "0", proposal.targetAmountAtomic || "0");
 
   async function donate() {
@@ -243,7 +250,7 @@ export default function ProposalDetailPage() {
           {permissions.isCreator && ["Pending", "Rejected"].includes(proposal.status) && proposal.blockchainStatus === "PENDING" && <button onClick={() => void deleteProposal()} className="bg-red-600 text-white px-4 py-2">Delete Proposal</button>}
           {permissions.isAdmin && proposal.status === "Approved" && proposal.blockchainStatus === "PENDING" && <button onClick={() => void registerOnChain()} disabled={connecting} className="bg-primary text-white px-4 py-2">Register On-chain</button>}
           {permissions.isAdmin && proposal.status === "Approved" && proposal.blockchainStatus === "CREATED" && <button onClick={() => void activateFunding()} disabled={connecting} className="bg-purple-600 text-white px-4 py-2">Activate Funding</button>}
-          {fundingOpen && finished && permissions.isCreator && ["Funding", "Release Rejected"].includes(proposal.status) && <button onClick={() => void requestWithdrawal()} disabled={connecting} className="bg-primary text-white px-4 py-2">Request Withdrawal</button>}
+          {withdrawalEligible && <button onClick={() => void requestWithdrawal()} disabled={connecting} className="bg-primary text-white px-4 py-2">{proposal.status === "Release Rejected" ? "Request Again" : "Request Withdrawal"}</button>}
           {proposal.status === "Withdrawal Requested" && permissions.isValidator && !permissions.isAdmin && <><button onClick={() => void reviewWithdrawal("approve")} className="bg-green-600 text-white px-4 py-2">Approve Release</button><button onClick={() => void reviewWithdrawal("reject")} className="bg-red-600 text-white px-4 py-2">Reject Release</button></>}
           {proposal.status === "Validator Release Approved" && permissions.isAdmin && <><button onClick={() => void reviewWithdrawal("approve")} className="bg-green-600 text-white px-4 py-2">Final Approve Release</button><button onClick={() => void reviewWithdrawal("reject")} className="bg-red-600 text-white px-4 py-2">Reject Release</button></>}
           {proposal.status === "Release Approved" && permissions.isAdmin && <button onClick={() => void releaseFund()} className="bg-black text-white px-4 py-2">Release BOT</button>}

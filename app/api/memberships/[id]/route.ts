@@ -56,6 +56,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     });
     if (activeOwnedProposal) return NextResponse.json({ message: "This member owns an active blockchain fundraising proposal and cannot be removed until it is cancelled or released." }, { status: 409 });
 
+    const validatorGroups = await GroupMember.find({
+      membershipId: data.target._id,
+      groupId: { $in: groupIds },
+      status: "ACTIVE",
+      role: "Validator",
+    }).select("groupId").lean();
+    const validatorGroupIds = validatorGroups.map((item) => item.groupId);
+    if (validatorGroupIds.length) {
+      const activeValidatorProposal = await Proposal.exists({
+        groupId: { $in: validatorGroupIds },
+        blockchainStatus: { $in: ["CREATED", "APPROVED"] },
+      });
+      if (activeValidatorProposal) {
+        return NextResponse.json({ message: "This member is an active validator for a group with an active blockchain campaign and cannot be removed until the campaign is cancelled or released." }, { status: 409 });
+      }
+    }
+
     await GroupJoinRequest.deleteMany({ membershipId: data.target._id, status: { $ne: "Approved" } });
     await GroupMember.deleteMany({ membershipId: data.target._id });
     await Promise.all(groupIds.map(async (groupId) => {

@@ -95,7 +95,7 @@ export default function ProposalBoard({
                   {proposal.status === "Validator Release Approved" && isAdmin && <><button onClick={() => onWithdrawalReview(proposal._id, "approve")} className="bg-green-600 text-white px-4 py-2">Final Approve Release</button><button onClick={() => onWithdrawalReview(proposal._id, "reject")} className="bg-red-600 text-white px-4 py-2">Reject Release</button></>}
                   {proposal.status === "Release Approved" && isAdmin && <button onClick={() => onRelease(proposal._id)} className="bg-black text-white px-4 py-2">Release BOT</button>}
                   {proposal.status === "Pending" && isCreator && proposal.blockchainStatus === "PENDING" && <button onClick={() => { if (window.confirm("Delete this pending proposal?")) onDelete(proposal._id); }} className="bg-red-600 text-white px-4 py-2">Delete Proposal</button>}
-                  {canCancel && (["Validated", "Approved", "Funding", "Release Rejected"].includes(proposal.status)) && <button onClick={() => { if (window.confirm("Cancel this proposal? Donors will be able to claim BOT refunds if funds were collected.")) onCancel(proposal._id); }} className="border-2 border-red-600 text-red-700 px-4 py-2">Cancel Proposal</button>}
+                  {canCancel && (["Validated", "Approved", "Funding"].includes(proposal.status)) && <button onClick={() => { if (window.confirm("Cancel this proposal? Donors will be able to claim BOT refunds if funds were collected.")) onCancel(proposal._id); }} className="border-2 border-red-600 text-red-700 px-4 py-2">Cancel Proposal</button>}
                 </div>
               </div>
             );

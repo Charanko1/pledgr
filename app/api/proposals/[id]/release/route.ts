@@ -3,10 +3,9 @@ import { getAddress, isHexString } from "ethers";
 import { connectDB } from "@/lib/mongodb";
 import { getAuthenticatedUser, AuthenticationError, authErrorResponse } from "@/lib/server-auth";
 import Proposal from "@/models/Proposal";
-import Membership from "@/models/Membership";
-import Group from "@/models/Group";
 import { syncVerifiedBlockchainEvent } from "@/lib/blockchain-sync";
 import { getServerContract } from "@/lib/blockchain-server";
+import { getGroupAccess } from "@/lib/authorization";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -19,10 +18,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const proposal = await Proposal.findById(id);
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
-    const group = await Group.findById(proposal.groupId, "organizationId").lean();
-    if (!group) return NextResponse.json({ message: "Proposal group not found." }, { status: 404 });
-    const isOrgAdmin = Boolean(await Membership.exists({ organizationId: group.organizationId, userId: user._id.toString(), role: "Admin" }));
-    if (!isOrgAdmin) return NextResponse.json({ message: "Only an organization admin can execute final fund release." }, { status: 403 });
+    const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
+    if (!access?.allowed) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    if (!access.isGroupAdmin) return NextResponse.json({ message: "Only a group admin can execute final fund release." }, { status: 403 });
     if (proposal.withdrawalStatus !== "AdminApproved" || proposal.status !== "Release Approved") return NextResponse.json({ message: "Validator and admin withdrawal approvals are required before release." }, { status: 409 });
     if (!user.walletAddress || !user.walletVerifiedAt) return NextResponse.json({ message: "Verify the contract admin wallet before releasing funds." }, { status: 403 });
 
