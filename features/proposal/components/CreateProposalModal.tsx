@@ -5,6 +5,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 
 interface ProposalForm {
+  unlimited?: boolean;
   title: string;
   description: string;
   target: string;
@@ -22,6 +23,7 @@ export default function CreateProposalModal({ open, onClose, onCreate, recipient
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [target, setTarget] = useState("");
+  const [unlimited, setUnlimited] = useState(false);
   const [deadline, setDeadline] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -34,11 +36,11 @@ export default function CreateProposalModal({ open, onClose, onCreate, recipient
     if (!title.trim()) return setError("Proposal title is required.");
     if (!description.trim()) return setError("Description is required.");
     if (!target.trim() || !/^\d+(\.\d{1,18})?$/.test(target.trim()) || Number(target) <= 0) return setError("Enter a valid BOT target with up to 18 decimals.");
-    if (!deadline || new Date(deadline).getTime() <= Date.now()) return setError("Choose a future deadline.");
+    if (!unlimited && (!deadline || new Date(deadline).getTime() <= Date.now())) return setError("Choose a future deadline.");
 
     setSaving(true);
     try {
-      await onCreate({ title: title.trim(), description: description.trim(), target: target.trim(), deadline });
+      await onCreate({ title: title.trim(), description: description.trim(), target: target.trim(), deadline, unlimited });
       setTitle(""); setDescription(""); setTarget(""); setDeadline("");
       onClose();
     } catch (err) {
@@ -79,10 +81,12 @@ export default function CreateProposalModal({ open, onClose, onCreate, recipient
           </div>
           <div>
             <label htmlFor="createproposalmodal-4" className="text-sm font-medium">Deadline</label>
-            <input id="createproposalmodal-4" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="w-full border rounded-none p-3 mt-2 shadow-brutal" />
+            <input id="createproposalmodal-4" disabled={unlimited} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="w-full border rounded-none p-3 mt-2 shadow-brutal" />
           </div>
         </div>
 
+        <label className="flex items-center gap-2"><input type="checkbox" checked={unlimited} onChange={e=>setUnlimited(e.target.checked)} /> Unlimited deadline</label>
+        <p className="text-sm text-gray-600">Donations stay open after the target or deadline. Unlimited campaigns unlock withdrawals when their target is reached.</p>
         {error && <p role="alert" className="text-red-700">{error}</p>}
         <button disabled={saving || !recipientWallet} onClick={() => void handleSubmit()} className="w-full bg-primary disabled:bg-gray-400 text-white py-3 rounded-none hover:bg-primary-hover border-2 border-foreground shadow-brutal">
           {saving ? "Saving…" : "Submit Proposal"}

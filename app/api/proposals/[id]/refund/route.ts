@@ -15,6 +15,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!isHexString(txHash, 32)) return NextResponse.json({ message: "A valid refund transaction hash is required." }, { status: 400 });
 
     const proposal = await Proposal.findById(id).lean();
+    if (proposal?.contractVersion === 2) return NextResponse.json({ message: "Use the V2 campaign workflow." }, { status: 409 });
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
     if (!user.walletAddress || !user.walletVerifiedAt) return NextResponse.json({ message: "Verify your MetaMask wallet before claiming a refund." }, { status: 403 });
 

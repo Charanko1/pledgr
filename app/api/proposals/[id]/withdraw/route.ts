@@ -34,6 +34,8 @@ export async function POST(
 
     const proposal = await Proposal.findById(id);
 
+    if (proposal?.contractVersion === 2) return NextResponse.json({ message: "Use the V2 campaign workflow." }, { status: 409 });
+
     if (!proposal) {
       return NextResponse.json(
         { message: "Proposal not found." },

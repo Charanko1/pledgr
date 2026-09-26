@@ -1,5 +1,7 @@
+import WithdrawalRequest from "@/models/WithdrawalRequest";
+import { v2Configuration } from "@/lib/v2/server";
 import { NextRequest, NextResponse } from "next/server";
-import { isAddress, parseEther } from "ethers";
+import { isAddress, parseEther, formatEther } from "ethers";
 import { parseDeadlineInput } from "@/lib/dates";
 import { connectDB } from "@/lib/mongodb";
 import Proposal from "@/models/Proposal";
@@ -33,7 +35,11 @@ export async function GET(req: NextRequest) {
     if (!access.allowed) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
 
     const proposals = await Proposal.find({ groupId }).sort({ createdAt: -1 }).populate({ path: "creatorId", select: "_id name email", model: User }).lean();
-    return NextResponse.json(proposals.map(serializeProposal));
+    const v2Ids = proposals.filter((p:any)=>p.contractVersion===2).map((p:any)=>p._id);
+    const pending = v2Ids.length ? await WithdrawalRequest.find({ proposalId:{$in:v2Ids}, status:{$in:["Requested","ValidatorApproved","Approved"]} }).sort({createdAt:-1}).select("proposalId status amount validUntil").lean() : [];
+    const summaries = new Map<string,any>();
+    for(const request of pending) if(!summaries.has(String(request.proposalId))) summaries.set(String(request.proposalId),request);
+    return NextResponse.json(proposals.map((p:any)=>({...serializeProposal(p),v2Withdrawal:summaries.get(String(p._id))||null})));
   } catch (error) {
     if (error instanceof AuthenticationError) return authErrorResponse(error);
     console.error("GET PROPOSALS ERROR:", error);
@@ -51,25 +57,28 @@ export async function POST(req: NextRequest) {
     const targetInput = typeof body.targetAmount === "string" || typeof body.targetAmount === "number" ? String(body.targetAmount).trim() : "";
     const deadlineInput = typeof body.deadline === "string" ? body.deadline : "";
     const groupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
-    if (!title || !description || !targetInput || !deadlineInput || !groupId) return NextResponse.json({ message: "Title, description, target, deadline, and group are required." }, { status: 400 });
+    const unlimited = body.unlimited === true;
+    if (!title || !description || !targetInput || (!deadlineInput && !unlimited) || !groupId) return NextResponse.json({ message: "Title, description, target, deadline, and group are required." }, { status: 400 });
     if (title.length > 120 || description.length > 4000) return NextResponse.json({ message: "Title or description is too long." }, { status: 400 });
 
     let targetAtomic: bigint;
     try { targetAtomic = parseEther(targetInput); } catch { return NextResponse.json({ message: "Target must be a valid BOT amount with up to 18 decimals." }, { status: 400 }); }
     if (targetAtomic <= 0n) return NextResponse.json({ message: "Target must be greater than zero." }, { status: 400 });
 
-    const deadline = parseDeadlineInput(deadlineInput);
-    if (!deadline || deadline.getTime() <= Date.now()) return NextResponse.json({ message: "Deadline must be a valid future date." }, { status: 400 });
+    const deadline = unlimited ? null : parseDeadlineInput(deadlineInput);
+    if (!unlimited && (!deadline || deadline.getTime() <= Date.now())) return NextResponse.json({ message: "Deadline must be a valid future date." }, { status: 400 });
 
     const access = await getGroupAccess(groupId, user._id.toString());
     if (!access?.group) return NextResponse.json({ message: "Group not found." }, { status: 404 });
     if (!access.allowed) return NextResponse.json({ message: "You must be an active group member to create a proposal." }, { status: 403 });
     if (!user.walletAddress || !isAddress(user.walletAddress) || !user.walletVerifiedAt) return NextResponse.json({ message: "Verify your MetaMask wallet before creating a fundraising proposal." }, { status: 400 });
 
+    const config = v2Configuration();
     const proposal = await Proposal.create({
+      contractVersion: 2, contractAddress: config.address, chainId: config.chainId, unlimited,
       title,
       description,
-      targetAmount: targetAtomic.toString(),
+      targetAmount: formatEther(targetAtomic),
       targetAmountAtomic: targetAtomic.toString(),
       fundedAmount: "0",
       fundedAmountAtomic: "0",

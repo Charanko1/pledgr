@@ -60,7 +60,7 @@ export default function ProposalBoard({
     <>
       {open && <CreateProposalModal open={open} onClose={() => setOpen(false)} onCreate={onCreate} recipientWallet={address} />}
       <div className="flex flex-wrap gap-3 justify-between items-center">
-        <div><h2 className="text-xl font-bold">Proposal Board</h2><p className="text-sm text-gray-500">Validator review → admin approval → on-chain funding → withdrawal.</p></div>
+        <div><h2 className="text-xl font-bold">Proposal Board</h2><p className="text-sm text-gray-500">Community review → creator registration → funding → gas-free withdrawal approvals → creator claim.</p></div>
         <button onClick={() => void openCreate()} disabled={connecting} className="bg-primary text-white px-4 py-2 rounded-none flex items-center gap-2 hover:bg-primary-hover disabled:bg-gray-400 pledgr-action"><Plus size={18} />{connecting ? "Connecting…" : "New Proposal"}</button>
       </div>
 
@@ -76,17 +76,19 @@ export default function ProposalBoard({
               <div key={proposal._id} className="bg-white border p-5 shadow-brutal">
                 <div className="flex flex-wrap gap-3 justify-between items-start">
                   <div className="min-w-0"><h3 className="font-bold text-lg">{proposal.title}</h3><p className="text-sm text-gray-500 mt-1">By {proposal.creator}</p><p className="text-xs text-gray-500 mt-1 break-all">Fundraiser: {proposal.recipientWallet}</p></div>
-                  <span className={`text-xs px-3 py-1 rounded-full ${statusClass(proposal)}`}>{proposal.status}</span>
+                  <span className={`text-xs px-3 py-1 rounded-full ${statusClass(proposal)}`}>{proposal.v2Withdrawal ? (proposal.v2Withdrawal.validUntil * 1000 <= Date.now() ? "Withdrawal expired" : proposal.v2Withdrawal.status === "Requested" ? "Awaiting validator signature" : proposal.v2Withdrawal.status === "ValidatorApproved" ? "Awaiting admin signature" : "Ready for creator claim") : proposal.status}</span>
                 </div>
 
                 <div className="mt-5"><div className="flex justify-between text-sm mb-2"><span>{formatBotAmount(proposal.fundedAmountAtomic || "0")} / {formatBotAmount(proposal.targetAmountAtomic || "0")} BOT</span><span>{percentage}%</span></div><div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-primary transition-all" style={{ width: `${percentage}%` }} /></div></div>
 
-                <p className="mt-3 text-xs text-gray-500">Blockchain: {proposal.blockchainStatus || "PENDING"} · Deadline: {new Date(proposal.deadline).toLocaleDateString()}</p>
+                <p className="mt-3 text-xs text-gray-500">Blockchain: {proposal.blockchainStatus || "PENDING"} · Deadline: {proposal.unlimited ? "Unlimited" : new Date(proposal.deadline).toLocaleDateString()}</p>
                 <div className="mt-5 flex gap-2 flex-wrap">
                   <Link href={`/organization/${orgId}/groups/${groupId}/proposal/${proposal._id}`} className="bg-primary text-white px-4 py-2 pledgr-action">View Detail</Link>
 
                   {proposal.status === "Pending" && isValidator && <><button onClick={() => onValidate(proposal._id, "approve")} className="bg-green-600 text-white px-4 py-2 pledgr-action">Validate</button><button onClick={() => onValidate(proposal._id, "reject")} className="bg-red-600 text-white px-4 py-2 pledgr-action">Reject</button></>}
                   {proposal.status === "Validated" && isAdmin && <><button onClick={() => onAdminReview(proposal._id, "approve")} className="bg-green-600 text-white px-4 py-2 pledgr-action">Approve Proposal</button><button onClick={() => onAdminReview(proposal._id, "reject")} className="bg-red-600 text-white px-4 py-2 pledgr-action">Reject</button></>}
+                  {proposal.contractVersion === 2 && <Link href={`/organization/${orgId}/groups/${groupId}/proposal/${proposal._id}`} className="bg-lime text-foreground px-4 py-2 pledgr-action">{isCreator ? "Manage funding & claims" : "Funding & signature reviews"}</Link>}
+                  {proposal.contractVersion !== 2 && <>
                   {proposal.status === "Approved" && proposal.blockchainStatus === "PENDING" && isAdmin && <button onClick={() => onRegisterOnChain(proposal._id)} className="bg-primary text-white px-4 py-2 pledgr-action">Register On-chain</button>}
                   {proposal.status === "Approved" && proposal.blockchainStatus === "CREATED" && isAdmin && <button onClick={() => onActivateFunding(proposal._id)} className="bg-purple-600 text-white px-4 py-2 pledgr-action">Activate Funding</button>}
                   {isFunding && !finished && <Link href={`/organization/${orgId}/groups/${groupId}/proposal/${proposal._id}`} className="bg-black text-white px-4 py-2 pledgr-action">Contribute BOT</Link>}
@@ -96,6 +98,7 @@ export default function ProposalBoard({
                   {proposal.status === "Release Approved" && isAdmin && <button onClick={() => onRelease(proposal._id)} className="bg-black text-white px-4 py-2 pledgr-action">Release BOT</button>}
                   {proposal.status === "Pending" && isCreator && proposal.blockchainStatus === "PENDING" && <button onClick={() => { if (window.confirm("Delete this pending proposal?")) onDelete(proposal._id); }} className="bg-red-600 text-white px-4 py-2 pledgr-action">Delete Proposal</button>}
                   {canCancel && (["Validated", "Approved", "Funding"].includes(proposal.status)) && <button onClick={() => { if (window.confirm("Cancel this proposal? Donors will be able to claim BOT refunds if funds were collected.")) onCancel(proposal._id); }} className="border-2 border-red-600 text-red-700 px-4 py-2 pledgr-action">Cancel Proposal</button>}
+                  </>}
                 </div>
               </div>
             );

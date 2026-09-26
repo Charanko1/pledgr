@@ -103,6 +103,7 @@ export function useGroup(groupId: string) {
         description: data.description,
         targetAmount: data.target,
         deadline: data.deadline,
+        unlimited: data.unlimited === true,
         groupId,
       }),
     });

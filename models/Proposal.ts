@@ -2,6 +2,13 @@ import { Schema, model, models } from "mongoose";
 
 const ProposalSchema = new Schema(
   {
+    contractVersion: { type: Number, default: 1 },
+    contractAddress: { type: String, default: "" },
+    chainId: { type: Number },
+    unlimited: { type: Boolean, default: false },
+    availableAmountAtomic: { type: String, default: "0" },
+    v2SyncedBlock: { type: Number, default: 0 },
+    registration: { type: Schema.Types.Mixed },
     title: { type: String, required: true, trim: true, maxlength: 120 },
     description: { type: String, required: true, trim: true, maxlength: 4000 },
     groupId: { type: Schema.Types.ObjectId, ref: "Group", required: true, index: true },
@@ -73,7 +80,7 @@ const ProposalSchema = new Schema(
     approvedAt: { type: Date, default: null },
     releasedAt: { type: Date, default: null },
     cancelledAt: { type: Date, default: null },
-    deadline: { type: Date, required: true, index: true },
+    deadline: { type: Date, default: null, index: true },
 
     refunds: [{
       amount: { type: String, required: true },

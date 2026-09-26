@@ -1,5 +1,6 @@
 "use client";
 
+import V2Proposal from "@/features/proposal/V2Proposal";
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
@@ -41,6 +42,7 @@ export default function ProposalDetailPage() {
   if (query.error || !query.data) return <ErrorState message={query.error?.message || "Proposal not found."} onRetry={() => void query.refetch()} />;
 
   const proposal = query.data;
+  if (proposal.contractVersion === 2) return <V2Proposal proposal={proposal} />;
 
   async function walletOrThrow() {
     const live = address || await connectWallet();

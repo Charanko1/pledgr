@@ -24,6 +24,7 @@ function getArg(event: any, key: string, index: number) { return event.args?.[ke
 async function loadProposalAndGroup(proposalId: string) {
   const proposal = await Proposal.findById(proposalId).lean();
   if (!proposal) throw new Error("Proposal not found.");
+  if (proposal.contractVersion === 2) throw new Error("Use V2 receipt synchronization.");
   const group = await Group.findById(proposal.groupId).select("organizationId name").lean();
   if (!group) throw new Error("Proposal group not found.");
   return { proposal, group };

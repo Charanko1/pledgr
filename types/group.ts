@@ -42,6 +42,12 @@ export type ProposalStatus =
   | "Released";
 
 export interface Proposal {
+  v2Withdrawal?: { status: "Requested" | "ValidatorApproved" | "Approved"; amount: string; validUntil: number } | null;
+  contractVersion?: number;
+  contractAddress?: string;
+  chainId?: number;
+  unlimited?: boolean;
+  availableAmountAtomic?: string;
   _id: string;
   groupId: string;
   title: string;
@@ -97,6 +103,7 @@ export interface Proposal {
 }
 
 export interface CreateProposalData {
+  unlimited?: boolean;
   title: string;
   description: string;
   target: string;

@@ -13,6 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const user = await getAuthenticatedUser(req);
     const { id } = await params;
     const proposal = await Proposal.findById(id);
+    if (proposal?.contractVersion === 2) return NextResponse.json({ message: "Use the V2 campaign workflow." }, { status: 409 });
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
     const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
     if (!access?.allowed) return NextResponse.json({ message: "Forbidden" }, { status: 403 });

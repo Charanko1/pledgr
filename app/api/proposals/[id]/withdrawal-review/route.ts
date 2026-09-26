@@ -18,6 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!action) return NextResponse.json({ message: "Action must be approve or reject." }, { status: 400 });
 
     const proposal = await Proposal.findById(id);
+    if (proposal?.contractVersion === 2) return NextResponse.json({ message: "Use the V2 campaign workflow." }, { status: 409 });
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
     const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
     if (!access?.allowed) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
