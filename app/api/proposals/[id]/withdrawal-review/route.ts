@@ -21,22 +21,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!proposal) return NextResponse.json({ message: "Proposal not found." }, { status: 404 });
     const access = await getGroupAccess(proposal.groupId.toString(), user._id.toString());
     if (!access?.allowed) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-    if (!["Requested", "ValidatorApproved"].includes(proposal.withdrawalStatus)) return NextResponse.json({ message: "This withdrawal is not awaiting the current review stage." }, { status: 409 });
+    // Verified approval receipts may be retried after realtime synchronization.
+    if (!user.walletAddress || !user.walletVerifiedAt) return NextResponse.json({ message: "Verify your wallet before reviewing a withdrawal." }, { status: 403 });
 
     if (action === "reject") {
       if (!access.isValidator && !access.isGroupAdmin) return NextResponse.json({ message: "Only a validator or group admin can reject a withdrawal." }, { status: 403 });
-      if (!["Requested", "ValidatorApproved"].includes(proposal.withdrawalStatus)) return NextResponse.json({ message: "This withdrawal is not awaiting review." }, { status: 409 });
       const resetTxHash = typeof body.resetTxHash === "string" ? body.resetTxHash.trim().toLowerCase() : "";
-      if (proposal.withdrawalStatus === "ValidatorApproved" && access.isGroupAdmin) {
-        if (!isHexString(resetTxHash, 32)) return NextResponse.json({ message: "Admin rejection after validator approval requires a verified blockchain reset transaction." }, { status: 400 });
-        await syncVerifiedBlockchainEvent({ proposalId: id, txHash: resetTxHash, eventType: "ValidatorReleaseApprovalReset", expectedTxFrom: user.walletAddress });
+      const rejection = { releaseRejectedBy: user._id, releaseRejectedAt: new Date(), releaseRejectedReason: note || "Withdrawal request rejected." };
+      if (resetTxHash) {
+        if (!access.isGroupAdmin) return NextResponse.json({ message: "Only a group admin can reset validator approval." }, { status: 403 });
+        if (!isHexString(resetTxHash, 32)) return NextResponse.json({ message: "A valid reset transaction hash is required." }, { status: 400 });
+        const result = await syncVerifiedBlockchainEvent({ proposalId: id, txHash: resetTxHash, eventType: "ValidatorReleaseApprovalReset", expectedTxFrom: user.walletAddress });
+        await Proposal.updateOne({ _id: id, withdrawalStatus: "Rejected", validatorReleaseResetTxHash: resetTxHash }, { $set: rejection });
+        return NextResponse.json({ message: "Withdrawal rejected.", proposal: result.proposal });
       }
-      proposal.withdrawalStatus = "Rejected";
-      proposal.status = "Release Rejected";
-      proposal.releaseRejectedBy = user._id;
-      proposal.releaseRejectedAt = new Date();
-      proposal.releaseRejectedReason = note || "Withdrawal request rejected.";
-      await proposal.save();
+      // Once validator approval is on-chain, rejection requires an admin reset.
+      const rejected = await Proposal.findOneAndUpdate({ _id: id, withdrawalStatus: "Requested" }, {
+        $set: { withdrawalStatus: "Rejected", status: "Release Rejected", ...rejection },
+      }, { new: true, runValidators: true });
+      if (!rejected) return NextResponse.json({ message: "This review stage requires an admin blockchain reset, or has already changed." }, { status: 409 });
+      proposal.set(rejected.toObject());
     } else {
       const blockchainTxHash = typeof body.blockchainTxHash === "string" ? body.blockchainTxHash.trim().toLowerCase() : "";
       const approvalType = body.blockchainApprovalType === "validator" ? "validator" : body.blockchainApprovalType === "admin" ? "admin" : "";
@@ -45,7 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (expectedType !== approvalType) return NextResponse.json({ message: "You cannot submit an approval for another role." }, { status: 403 });
       const eventType = approvalType === "validator" ? "ValidatorReleaseApproved" : "AdminReleaseApproved";
       const result = await syncVerifiedBlockchainEvent({ proposalId: id, txHash: blockchainTxHash, eventType, expectedEventActor: approvalType === "validator" ? user.walletAddress : undefined, expectedTxFrom: approvalType === "admin" ? user.walletAddress : undefined });
-      await Proposal.updateOne({ _id: id }, approvalType === "validator"
+      await Proposal.updateOne({ _id: id, [approvalType === "validator" ? "validatorReleaseApprovalTxHash" : "adminReleaseApprovalTxHash"]: blockchainTxHash }, approvalType === "validator"
         ? { $set: { validatorReleaseApprovedBy: user._id, ...(note ? { validatorReleaseNote: note } : {}) } }
         : { $set: { adminReleaseApprovedBy: user._id, ...(note ? { adminReleaseNote: note } : {}) } });
       const title = approvalType === "validator" ? "Withdrawal Validated" : "Withdrawal Approved by Admin";

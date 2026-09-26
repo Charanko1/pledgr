@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { releaseTransaction } from "@/lib/release-transaction";
 import { apiClient } from "@/lib/api-client";
 import type {
   GroupData,
@@ -314,25 +315,9 @@ export function useGroup(groupId: string) {
         proposal.withdrawalStatus === "ValidatorApproved" &&
         group?.currentRole === "Admin"
       ) {
-        await ensureContractAdminWallet();
-
-        const { getContract } = await import("@/lib/blockchain");
-        const contract = await getContract();
-        const tx = await contract.resetValidatorReleaseApproval(id);
-
-        await tx.wait();
-
-        await apiClient(
-          `/api/proposals/${id}/withdrawal-review`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({
-              action,
-              note,
-              resetTxHash: tx.hash,
-            }),
-          }
-        );
+        await requireWallet();
+        await releaseTransaction(id, "resetValidatorReleaseApproval", (hash) =>
+          apiClient(`/api/proposals/${id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action, note, resetTxHash: hash }) }));
       } else {
         await apiClient(
           `/api/proposals/${id}/withdrawal-review`,
@@ -362,44 +347,11 @@ export function useGroup(groupId: string) {
     }
 
     await requireWallet();
-
-    const { getContract } = await import("@/lib/blockchain");
-    const contract = await getContract();
-    let tx;
-
-    if (canApproveAsValidator) {
-      tx = await contract.approveValidatorRelease(id);
-      await tx.wait();
-
-      await apiClient(
-        `/api/proposals/${id}/withdrawal-review`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            action,
-            note,
-            blockchainTxHash: tx.hash,
-            blockchainApprovalType: "validator",
-          }),
-        }
-      );
-    } else {
-      tx = await contract.approveAdminRelease(id);
-      await tx.wait();
-
-      await apiClient(
-        `/api/proposals/${id}/withdrawal-review`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            action,
-            note,
-            blockchainTxHash: tx.hash,
-            blockchainApprovalType: "admin",
-          }),
-        }
-      );
-    }
+    const approvalType = canApproveAsValidator ? "validator" : "admin";
+    await releaseTransaction(id, canApproveAsValidator ? "approveValidatorRelease" : "approveAdminRelease", (hash) =>
+      apiClient(`/api/proposals/${id}/withdrawal-review`, {
+        method: "PATCH", body: JSON.stringify({ action, note, blockchainTxHash: hash, blockchainApprovalType: approvalType }),
+      }));
 
     await refresh();
   }
@@ -413,26 +365,10 @@ export function useGroup(groupId: string) {
       );
     }
 
-    await ensureContractAdminWallet();
-
-    const { getContract } = await import("@/lib/blockchain");
-    const contract = await getContract();
-    const campaign = await contract.getCampaign(id);
-    const amount = BigInt(campaign.totalRaised);
-
-    if (amount <= 0n) {
-      throw new Error(
-        "There are no BOT funds available to release."
-      );
-    }
-
-    const tx = await contract.releaseFund(id);
-    await tx.wait();
-
-    await apiClient(`/api/proposals/${id}/release`, {
-      method: "POST",
-      body: JSON.stringify({ txHash: tx.hash }),
-    });
+    await requireWallet();
+    await releaseTransaction(id, "releaseFund", (hash) => apiClient(`/api/proposals/${id}/release`, {
+      method: "POST", body: JSON.stringify({ txHash: hash }),
+    }));
 
     await refresh();
   }

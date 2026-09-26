@@ -1,3 +1,4 @@
+import { hasAppliedEvent } from "@/lib/applied-blockchain-event";
 import { getAddress, formatEther, Contract } from "ethers";
 import Proposal from "@/models/Proposal";
 import Group from "@/models/Group";
@@ -102,6 +103,7 @@ export async function syncVerifiedBlockchainEvent({ proposalId, txHash, eventTyp
   if (existing) {
     if (existing.proposalId.toString() !== proposalId || existing.eventType !== eventType) throw new Error("Transaction hash has already been used for a different PLEDGR event.");
     const current = await Proposal.findById(proposalId).lean();
+    await writeHistory(group, current, eventType, meta, txHash);
     return { proposal: current, parsedEvent, txFrom: tx.from, alreadyProcessed: true };
   }
 
@@ -111,6 +113,13 @@ export async function syncVerifiedBlockchainEvent({ proposalId, txHash, eventTyp
     if (eventType !== "CampaignCreated" && getAddress(meta.actor) !== contractAdmin) throw new Error("The blockchain admin event actor is invalid.");
   } else if (getAddress(meta.actor) !== getAddress(tx.from)) {
     throw new Error("The blockchain event actor does not match the transaction sender.");
+  }
+
+  // The proposal write may have succeeded before ledger/history persistence failed.
+  if (hasAppliedEvent(original, eventType, txHash)) {
+    await ensureTransactionRecord({ txHash, eventType, proposalId, actor: meta.actor, recipient: meta.recipient, amountAtomic: meta.amountAtomic, blockNumber: receipt.blockNumber });
+    await writeHistory(group, original, eventType, meta, txHash);
+    return { proposal: original, parsedEvent, txFrom: tx.from, alreadyProcessed: true };
   }
 
   const campaign = eventType === "CampaignCreated" ? null : await onChainCampaign(proposalId);
@@ -142,7 +151,7 @@ export async function syncVerifiedBlockchainEvent({ proposalId, txHash, eventTyp
   }
   if (eventType === "ValidatorReleaseApprovalReset") {
     if (!campaign || campaign.cancelled || campaign.released) throw new Error("The campaign cannot reset its release approval in the current state.");
-    if (!campaign.validatorReleaseApproved || campaign.adminReleaseApproved) throw new Error("The validator release approval cannot be reset now.");
+    if (campaign.validatorReleaseApproved || campaign.adminReleaseApproved) throw new Error("The validator release approval cannot be reset now.");
     if (original.withdrawalStatus !== "ValidatorApproved") throw new Error("Only a validator-approved withdrawal can be reset by admin.");
   }
   if (eventType === "WithdrawalRequested") {
@@ -212,7 +221,7 @@ export async function syncVerifiedBlockchainEvent({ proposalId, txHash, eventTyp
     updateFilter.blockchainStatus = "APPROVED";
     updateFilter["transactions.txHash"] = { $ne: txHash };
     const totalRaised = BigInt(campaign?.totalRaised as bigint);
-    update = { $set: { status: "Funding", fundedAmountAtomic: totalRaised.toString(), fundedAmount: displayAmount(totalRaised) }, $push: { transactions: { amount: amountDisplay, amountAtomic: meta.amountAtomic, donor: meta.actor, txHash, donatedAt: new Date() } } };
+    update = { $set: { fundedAmountAtomic: totalRaised.toString(), fundedAmount: displayAmount(totalRaised) }, $push: { transactions: { amount: amountDisplay, amountAtomic: meta.amountAtomic, donor: meta.actor, txHash, donatedAt: new Date() } } };
   } else if (eventType === "CampaignCancelled") {
     updateFilter.blockchainStatus = { $in: ["CREATED", "APPROVED"] };
     updateFilter.cancelTxHash = { $ne: txHash };
@@ -232,19 +241,7 @@ export async function syncVerifiedBlockchainEvent({ proposalId, txHash, eventTyp
   let updated = await Proposal.findOneAndUpdate(updateFilter, update, { new: true, runValidators: true }).lean();
   if (!updated) {
     const now = await Proposal.findById(proposalId).lean();
-    const alreadyOnProposal = eventType === "Donated"
-      ? Boolean(now?.transactions?.some((item: any) => item.txHash?.toLowerCase() === txHash))
-      : eventType === "RefundClaimed"
-        ? Boolean(now?.refunds?.some((item: any) => item.txHash?.toLowerCase() === txHash))
-        : eventType === "CampaignCreated"
-          ? now?.blockchainCreateTxHash?.toLowerCase() === txHash
-          : eventType === "CampaignApproved"
-            ? now?.blockchainApprovalTxHash?.toLowerCase() === txHash
-            : eventType === "CampaignCancelled"
-              ? now?.cancelTxHash?.toLowerCase() === txHash
-              : eventType === "FundReleased"
-                ? now?.releaseTxHash?.toLowerCase() === txHash
-                : false;
+    const alreadyOnProposal = hasAppliedEvent(now, eventType, txHash);
     if (!alreadyOnProposal) throw new Error("The proposal state changed before this blockchain event could be synchronized.");
     updated = now;
   }

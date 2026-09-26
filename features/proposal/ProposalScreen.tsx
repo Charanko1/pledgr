@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
+import { releaseTransaction } from "@/lib/release-transaction";
+import SyncRelease from "@/features/proposal/components/SyncRelease";
 import { apiClient } from "@/lib/api-client";
 import { ErrorState, LoadingState } from "@/components/ui/ContentState";
 import ProposalHero from "@/features/proposal/components/ProposalHero";
@@ -163,39 +165,26 @@ export default function ProposalDetailPage() {
       if (action === "reject") {
         if (permissions.isAdmin && proposal.withdrawalStatus === "ValidatorApproved") {
           await walletOrThrow();
-          const { getContract } = await import("@/lib/blockchain");
-          const contract = await getContract();
-          const tx = await contract.resetValidatorReleaseApproval(proposal._id);
-          await tx.wait();
-          await apiClient(`/api/proposals/${proposal._id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action, resetTxHash: tx.hash }) });
+          await releaseTransaction(proposal._id, "resetValidatorReleaseApproval", (hash) =>
+            apiClient(`/api/proposals/${proposal._id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action, resetTxHash: hash }) }));
         } else {
           await apiClient(`/api/proposals/${proposal._id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action }) });
         }
         return;
       }
       await walletOrThrow();
-      const { getContract } = await import("@/lib/blockchain");
-      const contract = await getContract();
       const approvalType = permissions.isValidator && !permissions.isAdmin && proposal.withdrawalStatus === "Requested" ? "validator" : permissions.isAdmin && proposal.withdrawalStatus === "ValidatorApproved" ? "admin" : "";
       if (!approvalType) throw new Error("This withdrawal is not awaiting approval from your role.");
-      const tx = approvalType === "validator" ? await contract.approveValidatorRelease(proposal._id) : await contract.approveAdminRelease(proposal._id);
-      await tx.wait();
-      await apiClient(`/api/proposals/${proposal._id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action, blockchainTxHash: tx.hash, blockchainApprovalType: approvalType }) });
+      await releaseTransaction(proposal._id, approvalType === "validator" ? "approveValidatorRelease" : "approveAdminRelease", (hash) =>
+        apiClient(`/api/proposals/${proposal._id}/withdrawal-review`, { method: "PATCH", body: JSON.stringify({ action, blockchainTxHash: hash, blockchainApprovalType: approvalType }) }));
     });
   }
 
   async function releaseFund() {
     await run(async () => {
       await walletOrThrow();
-      const { getContract, getContractAdmin, getWalletAddress } = await import("@/lib/blockchain");
-      const live = await getWalletAddress();
-      if ((await getContractAdmin()).toLowerCase() !== live.toLowerCase()) throw new Error("Connected wallet is not the PLEDGR contract admin.");
-      const contract = await getContract();
-      const campaign = await contract.getCampaign(proposal._id);
-      if (BigInt(campaign.totalRaised) <= 0n) throw new Error("There are no BOT funds to release.");
-      const tx = await contract.releaseFund(proposal._id);
-      await tx.wait();
-      await apiClient(`/api/proposals/${proposal._id}/release`, { method: "POST", body: JSON.stringify({ txHash: tx.hash }) });
+      await releaseTransaction(proposal._id, "releaseFund", (hash) =>
+        apiClient(`/api/proposals/${proposal._id}/release`, { method: "POST", body: JSON.stringify({ txHash: hash }) }));
     });
   }
 
@@ -245,16 +234,16 @@ export default function ProposalDetailPage() {
         {proposal.creatorProfile && <p className="mt-3 text-sm">Creator: <span className="font-semibold">{proposal.creatorProfile.name}</span></p>}
         <p className="mt-2 text-sm break-all">Fundraiser wallet: <span className="font-semibold">{proposal.recipientWallet}</span></p>
         <div className="mt-5 flex flex-wrap gap-2 text-sm">
-          {permissions.isValidator && proposal.status === "Pending" && <><button onClick={() => void validateProposal("approve")} className="bg-green-600 text-white px-4 py-2">Validate</button><button onClick={() => void validateProposal("reject")} className="bg-red-600 text-white px-4 py-2">Reject</button></>}
-          {permissions.isAdmin && proposal.status === "Validated" && <><button onClick={() => void reviewProposal("approve")} className="bg-green-600 text-white px-4 py-2">Approve Proposal</button><button onClick={() => void reviewProposal("reject")} className="bg-red-600 text-white px-4 py-2">Reject Proposal</button></>}
-          {permissions.isCreator && ["Pending", "Rejected"].includes(proposal.status) && proposal.blockchainStatus === "PENDING" && <button onClick={() => void deleteProposal()} className="bg-red-600 text-white px-4 py-2">Delete Proposal</button>}
-          {permissions.isAdmin && proposal.status === "Approved" && proposal.blockchainStatus === "PENDING" && <button onClick={() => void registerOnChain()} disabled={connecting} className="bg-primary text-white px-4 py-2">Register On-chain</button>}
-          {permissions.isAdmin && proposal.status === "Approved" && proposal.blockchainStatus === "CREATED" && <button onClick={() => void activateFunding()} disabled={connecting} className="bg-purple-600 text-white px-4 py-2">Activate Funding</button>}
-          {withdrawalEligible && <button onClick={() => void requestWithdrawal()} disabled={connecting} className="bg-primary text-white px-4 py-2">{proposal.status === "Release Rejected" ? "Request Again" : "Request Withdrawal"}</button>}
-          {proposal.status === "Withdrawal Requested" && permissions.isValidator && !permissions.isAdmin && <><button onClick={() => void reviewWithdrawal("approve")} className="bg-green-600 text-white px-4 py-2">Approve Release</button><button onClick={() => void reviewWithdrawal("reject")} className="bg-red-600 text-white px-4 py-2">Reject Release</button></>}
-          {proposal.status === "Validator Release Approved" && permissions.isAdmin && <><button onClick={() => void reviewWithdrawal("approve")} className="bg-green-600 text-white px-4 py-2">Final Approve Release</button><button onClick={() => void reviewWithdrawal("reject")} className="bg-red-600 text-white px-4 py-2">Reject Release</button></>}
-          {proposal.status === "Release Approved" && permissions.isAdmin && <button onClick={() => void releaseFund()} className="bg-black text-white px-4 py-2">Release BOT</button>}
-          {permissions.isCreator || permissions.isAdmin ? (!isCancelled && !isReleased && ["Validated", "Approved", "Funding"].includes(proposal.status) ? <button onClick={() => { if (window.confirm("Cancel this proposal? Donors will be able to claim their BOT refunds.")) void cancel(); }} className="border-2 border-red-600 text-red-700 px-4 py-2">Cancel Proposal</button> : null) : null}
+          {permissions.isValidator && proposal.status === "Pending" && <><button onClick={() => void validateProposal("approve")} className="bg-green-600 text-white px-4 py-2 pledgr-action">Validate</button><button onClick={() => void validateProposal("reject")} className="bg-red-600 text-white px-4 py-2 pledgr-action">Reject</button></>}
+          {permissions.isAdmin && proposal.status === "Validated" && <><button onClick={() => void reviewProposal("approve")} className="bg-green-600 text-white px-4 py-2 pledgr-action">Approve Proposal</button><button onClick={() => void reviewProposal("reject")} className="bg-red-600 text-white px-4 py-2 pledgr-action">Reject Proposal</button></>}
+          {permissions.isCreator && ["Pending", "Rejected"].includes(proposal.status) && proposal.blockchainStatus === "PENDING" && <button onClick={() => void deleteProposal()} className="bg-red-600 text-white px-4 py-2 pledgr-action">Delete Proposal</button>}
+          {permissions.isAdmin && proposal.status === "Approved" && proposal.blockchainStatus === "PENDING" && <button onClick={() => void registerOnChain()} disabled={connecting} className="bg-primary text-white px-4 py-2 pledgr-action">Register On-chain</button>}
+          {permissions.isAdmin && proposal.status === "Approved" && proposal.blockchainStatus === "CREATED" && <button onClick={() => void activateFunding()} disabled={connecting} className="bg-purple-600 text-white px-4 py-2 pledgr-action">Activate Funding</button>}
+          {withdrawalEligible && <button onClick={() => void requestWithdrawal()} disabled={connecting} className="bg-primary text-white px-4 py-2 pledgr-action">{proposal.status === "Release Rejected" ? "Request Again" : "Request Withdrawal"}</button>}
+          {proposal.status === "Withdrawal Requested" && permissions.isValidator && !permissions.isAdmin && <><button onClick={() => void reviewWithdrawal("approve")} className="bg-green-600 text-white px-4 py-2 pledgr-action">Approve Release</button><button onClick={() => void reviewWithdrawal("reject")} className="bg-red-600 text-white px-4 py-2 pledgr-action">Reject Release</button></>}
+          {proposal.status === "Validator Release Approved" && permissions.isAdmin && <><button onClick={() => void reviewWithdrawal("approve")} className="bg-green-600 text-white px-4 py-2 pledgr-action">Final Approve Release</button><button onClick={() => void reviewWithdrawal("reject")} className="bg-red-600 text-white px-4 py-2 pledgr-action">Reject Release</button></>}
+          {proposal.status === "Release Approved" && permissions.isAdmin && <button onClick={() => void releaseFund()} className="bg-black text-white px-4 py-2 pledgr-action">Release BOT</button>}
+          {permissions.isCreator || permissions.isAdmin ? (!isCancelled && !isReleased && ["Validated", "Approved", "Funding"].includes(proposal.status) ? <button onClick={() => { if (window.confirm("Cancel this proposal? Donors will be able to claim their BOT refunds.")) void cancel(); }} className="border-2 border-red-600 text-red-700 px-4 py-2 pledgr-action">Cancel Proposal</button> : null) : null}
         </div>
       </div>
 
@@ -265,6 +254,7 @@ export default function ProposalDetailPage() {
 
       {isCancelled && <div className="bg-white border p-6 shadow-brutal"><h2 className="text-xl font-bold">Campaign Cancelled</h2><p className="text-sm text-gray-600 mt-2">Donors can claim back the BOT they contributed from the smart contract.</p><button onClick={() => void claimRefund()} disabled={connecting} className="mt-4 bg-primary text-white px-5 py-3 border-2 border-foreground shadow-brutal">{address ? "Claim my BOT refund" : "Connect wallet to claim refund"}</button></div>}
 
+      <SyncRelease proposalId={proposal._id} onSynced={invalidate} />
       <div className="bg-white border p-6 shadow-brutal"><h2 className="text-xl font-bold mb-3">Blockchain Transactions</h2><div className="space-y-2 text-xs font-mono break-all">{proposal.blockchainCreateTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.blockchainCreateTxHash)} target="_blank" rel="noreferrer">Creation: {proposal.blockchainCreateTxHash}</a>}{proposal.blockchainApprovalTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.blockchainApprovalTxHash)} target="_blank" rel="noreferrer">Activation: {proposal.blockchainApprovalTxHash}</a>}{proposal.withdrawalRequestTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.withdrawalRequestTxHash)} target="_blank" rel="noreferrer">Withdrawal request: {proposal.withdrawalRequestTxHash}</a>}{proposal.validatorReleaseApprovalTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.validatorReleaseApprovalTxHash)} target="_blank" rel="noreferrer">Validator release: {proposal.validatorReleaseApprovalTxHash}</a>}{proposal.validatorReleaseResetTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.validatorReleaseResetTxHash)} target="_blank" rel="noreferrer">Validator reset: {proposal.validatorReleaseResetTxHash}</a>}{proposal.adminReleaseApprovalTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.adminReleaseApprovalTxHash)} target="_blank" rel="noreferrer">Admin release approval: {proposal.adminReleaseApprovalTxHash}</a>}{proposal.cancelTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.cancelTxHash)} target="_blank" rel="noreferrer">Cancellation: {proposal.cancelTxHash}</a>}{proposal.releaseTxHash && <a className="text-primary underline block" href={getExplorerTxUrl(proposal.releaseTxHash)} target="_blank" rel="noreferrer">Release: {proposal.releaseTxHash}</a>}{!proposal.blockchainCreateTxHash && !proposal.blockchainApprovalTxHash && !proposal.withdrawalRequestTxHash && !proposal.validatorReleaseApprovalTxHash && !proposal.validatorReleaseResetTxHash && !proposal.adminReleaseApprovalTxHash && !proposal.cancelTxHash && !proposal.releaseTxHash && <span className="text-gray-500">No blockchain transactions yet.</span>}</div></div>
     </div>
   );
