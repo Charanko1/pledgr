@@ -18,7 +18,7 @@ function render(overrides={}){
   };
   const source=ts.transpileModule(fs.readFileSync(path.join(__dirname,'../features/proposal/V2Proposal.tsx'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
   const module={exports:{}};
-  vm.runInNewContext(source,{module,exports:module.exports,require:id=>id in mocks?mocks[id]:require(id),Error,console});
+  vm.runInNewContext(source,{module,exports:module.exports,require:id=>{ if(id in mocks)return mocks[id]; if(id.startsWith("@/")){ const base=path.join(__dirname,"..",id.slice(2)); const file=fs.existsSync(base+".tsx")?base+".tsx":base+".ts"; const child={exports:{}}; vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,{module:child,exports:child.exports,require,Set}); return child.exports; } return require(id); },Error,console});
   return renderToStaticMarkup(React.createElement(module.exports.default,{proposal:{_id:'proposal',creator:'Creator',recipientWallet:wallet,title:'Community garden',description:'Fund our garden',contractAddress:wallet,transactions:[]}}));
 }
 test('creator has partial withdrawal input and donations remain open at target/unlimited',()=>{
@@ -65,3 +65,4 @@ test('only creator of an open proposal sees the end control',()=>{
   assert.match(render(),/>End proposal</);
   assert.doesNotMatch(render({permissions:{isCreator:false,isAdmin:true,isValidator:false}}),/>End proposal</);
 });
+

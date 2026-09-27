@@ -1,4 +1,6 @@
 "use client";
+import { ActionNotice } from "@/components/ui/ActionNotice";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import V2Proposal from "@/features/proposal/V2Proposal";
 import { useRef, useState } from "react";
@@ -66,7 +68,7 @@ export default function ProposalDetailPage() {
     pending.current = true;
     setMessage("");
     try { await action(); await invalidate(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "The action could not be completed."); }
+    catch (error) { setMessage(walletErrorMessage(error)); }
     finally { pending.current = false; }
   }
 
@@ -86,7 +88,7 @@ export default function ProposalDetailPage() {
 
   async function donate() {
     let amountAtomic: bigint;
-    try { amountAtomic = parseBotAmount(donationAmount); } catch (error) { setMessage(error instanceof Error ? error.message : "Enter a valid BOT amount."); return; }
+    try { amountAtomic = parseBotAmount(donationAmount); } catch (error) { setMessage(walletErrorMessage(error)); return; }
     await run(async () => {
       await walletOrThrow();
       const { getContract } = await import("@/lib/blockchain");
@@ -229,7 +231,7 @@ export default function ProposalDetailPage() {
 
   return (
     <div className="space-y-8">
-      {message && <p role="status" className="pledgr-panel p-4 break-words">{message}</p>}
+      <ActionNotice message={message} onDismiss={() => setMessage("")} />
       <ProposalHero proposal={proposal} />
       <div className="bg-white border p-6 shadow-brutal">
         <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-bold">Workflow Status</h2><p className="text-sm text-gray-500 mt-1">{proposal.status}</p></div><span className="text-xs border-2 border-foreground px-3 py-1">Blockchain: {proposal.blockchainStatus || "PENDING"}</span></div>

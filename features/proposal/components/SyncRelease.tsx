@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import { useRef, useState } from "react";
 import { apiClient } from "@/lib/api-client";
@@ -19,7 +20,7 @@ export default function SyncRelease({ proposalId, onSynced }: { proposalId: stri
       await apiClient("/api/blockchain/sync", { method: "POST", body: JSON.stringify({ proposalId, type, txHash: hash.trim() }) });
       await onSynced();
       setMessage("Confirmed transaction synchronized. The proposal is up to date.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not synchronize the transaction."); }
+    } catch (error) { setMessage(walletErrorMessage(error)); }
     finally { lock.current = false; setBusy(false); }
   }
   return <details className="bg-white border-2 border-foreground p-5 shadow-brutal">

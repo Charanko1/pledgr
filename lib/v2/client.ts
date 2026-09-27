@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import { Contract } from "ethers";
 import { getSigner, getReadProvider } from "@/lib/blockchain";
@@ -26,6 +27,6 @@ export async function v2Transaction(proposalId:string, address:string, action:st
     if(receipt.status!==1){localStorage.removeItem(key);throw new Error("Transaction reverted.");}
     await apiClient(`/api/proposals/${proposalId}/v2`,{method:"POST",body:JSON.stringify({action:"sync",txHash:hash})});
     localStorage.removeItem(key);
-  }catch(error){throw new Error(`${error instanceof Error?error.message:"Transaction failed."}${hash?` Transaction: ${hash}. Use Sync transaction if the wallet shows success.`:""}`);}
+  }catch(error){throw new Error(`${walletErrorMessage(error)}${hash?` Transaction: ${hash}. Use Sync transaction if the wallet shows success.`:""}`);}
   finally{locks.delete(key);}
 }

@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import {
   createContext,
@@ -91,14 +92,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setActiveAddress(confirmedAddress);
       return confirmedAddress;
     } catch (err) {
-      const code = (err as { code?: number }).code;
-      setError(
-        code === 4001
-          ? "Wallet connection or signature was cancelled."
-          : err instanceof Error
-            ? err.message
-            : "Could not connect your wallet. Please try again."
-      );
+      setError(walletErrorMessage(err));
       setActiveAddress("");
       return null;
     } finally {

@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -31,7 +32,7 @@ export default function OrganizationScreen() {
       if (options?.method === "DELETE" && url.startsWith("/api/organizations/")) { router.push("/dashboard"); return; }
       await refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "The action could not be completed.");
+      setActionError(walletErrorMessage(err));
       throw err;
     }
   };

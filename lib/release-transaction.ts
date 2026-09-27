@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import { getContract, getWalletAddress, BOT_CHAIN_ID, CONTRACT_ADDRESS, getReadProvider } from "@/lib/blockchain";
 
@@ -38,7 +39,7 @@ export async function releaseTransaction(id: string, action: Action, sync: (hash
     await sync(hash!);
     window.localStorage.removeItem(key);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The action failed.";
+    const message = walletErrorMessage(error);
     throw new Error(hash ? `${message} Transaction: ${hash}. Retry to synchronize it, or use Sync confirmed transaction in View Detail.` : message);
   } finally {
     pending.delete(key);

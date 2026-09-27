@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import Modal from "@/components/ui/Modal";
 import { useState } from "react";
@@ -44,7 +45,7 @@ export default function CreateProposalModal({ open, onClose, onCreate, recipient
       setTitle(""); setDescription(""); setTarget(""); setDeadline("");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save. Please try again.");
+      setError(walletErrorMessage(err));
     } finally {
       setSaving(false);
     }

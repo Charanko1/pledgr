@@ -1,4 +1,5 @@
 "use client";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import dynamic from "next/dynamic";
 import { ErrorState, LoadingState } from "@/components/ui/ContentState";
@@ -69,9 +70,7 @@ export default function GroupPage() {
       await action();
     } catch (actionErrorValue: unknown) {
       setActionError(
-        actionErrorValue instanceof Error
-          ? actionErrorValue.message
-          : "The action could not be completed. Please try again."
+        walletErrorMessage(actionErrorValue)
       );
     }
   }

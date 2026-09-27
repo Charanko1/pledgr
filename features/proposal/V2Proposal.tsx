@@ -1,4 +1,6 @@
 "use client";
+import { ActionNotice } from "@/components/ui/ActionNotice";
+import { walletErrorMessage } from "@/lib/wallet-errors";
 
 import { approvalLabel, type ApprovalPolicy } from "@/lib/approval-policy";
 import { useRef, useState } from "react";
@@ -51,7 +53,7 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
       await action();
       await Promise.all([client.invalidateQueries({queryKey:["proposal-v2",p._id]}),client.invalidateQueries({queryKey:["proposal",p._id]}),client.invalidateQueries({queryKey:["group"]}),client.invalidateQueries({queryKey:["history"]})]);
       setMessage(success);
-    }catch(error){setMessage(error instanceof Error?error.message:"Action failed.");}
+    }catch(error){setMessage(walletErrorMessage(error));}
     finally{lock.current=false;setBusy(false);}
   }
   if(query.isPending)return <LoadingState label="Reading campaign and signatures…"/>;
@@ -109,7 +111,7 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
   const awaitingReviewer=Boolean(!creator&&w&&!expired&&["Requested","ValidatorApproved","AdminApproved"].includes(w.status)&&reviewerRole&&!(reviewerRole==="validator"?w.validatorSignature:w.adminSignature));
   return <div className="space-y-6">
     <header className="pledgr-hero p-6 space-y-3"><p className="pledgr-eyebrow">Community funding · V2</p><h1 className="text-3xl font-bold">{p.title}</h1><p>{p.description}</p><p className="text-sm break-all">Creator: {p.creator} · {p.recipientWallet}</p></header>
-    {message&&<p role="status" className="border-2 border-foreground bg-lime p-4 break-words">{message}</p>}
+    <ActionNotice message={message} onDismiss={() => setMessage("")} />
     <fieldset disabled={busy} aria-busy={busy} className="space-y-6 min-w-0">
       {ended&&<section className={`${panel} bg-lime`}><h2 className="text-xl font-bold">Fundraising finished</h2><p>New donations are closed.{c&&BigInt(c.available)>0n?" The creator can still request and claim the remaining funds with the required approvals.":" Thank you for being part of this proposal."}</p></section>}
       {!c&&!ended&&<section className={panel}>
