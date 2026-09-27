@@ -42,18 +42,22 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
     bytes32 private constant REGISTRATION_TYPEHASH = keccak256("Registration(bytes32 campaignId,address creator,address validator,address reviewerAdmin,uint256 target,uint256 deadline,uint256 validUntil)");
     bytes32 private constant WITHDRAWAL_TYPEHASH = keccak256("Withdrawal(bytes32 campaignId,bytes32 requestId,address creator,uint256 amount,uint256 nonce,uint256 validUntil)");
     mapping(bytes32 => Campaign) private campaigns;
+    // Kept separate so getCampaign remains ABI-compatible with older V2 deployments.
+    mapping(bytes32 => bool) public ended;
     mapping(bytes32 => mapping(address => uint256)) public donations;
     event CampaignRegistered(bytes32 indexed campaignId, address indexed creator);
     event Donated(bytes32 indexed campaignId, address indexed donor, uint256 amount);
     event Claimed(bytes32 indexed campaignId, bytes32 indexed requestId, address indexed creator, uint256 amount, uint256 nonce);
     event TermsUpdated(bytes32 indexed campaignId, uint256 target, uint256 deadline);
     event CampaignCancelled(bytes32 indexed campaignId);
+    event CampaignEnded(bytes32 indexed campaignId);
     event Refunded(bytes32 indexed campaignId, address indexed donor, uint256 amount);
 
     constructor() EIP712("PledgrTreasury", "2") {}
 
     /// @notice Zero reviewer addresses denote roles exempt under the signed policy.
     function approvalPolicyVersion() external pure returns (uint256) { return 1; }
+    function campaignLifecycleVersion() external pure returns (uint256) { return 1; }
 
     function campaignKey(address creator, string calldata proposalId) public pure returns (bytes32) {
         return keccak256(abi.encode(creator, proposalId));
@@ -84,7 +88,7 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
     }
     function donate(bytes32 id) external payable {
         Campaign storage c = _campaign(id);
-        require(!c.cancelled && msg.value > 0, "Donation unavailable");
+        require(!c.cancelled && !ended[id] && msg.value > 0, "Donation unavailable");
         c.totalRaised += msg.value;
         donations[id][msg.sender] += msg.value;
         _unlock(c);
@@ -92,13 +96,22 @@ contract PledgrTreasuryV2 is EIP712, ReentrancyGuard {
     }
     function updateTerms(bytes32 id, uint256 target, uint256 deadline) external {
         Campaign storage c = _campaign(id);
-        require(msg.sender == c.creator && !c.cancelled, "Only active creator");
+        require(msg.sender == c.creator && !c.cancelled && !ended[id], "Only active creator");
         require(target >= c.target, "Target cannot decrease");
         require(deadline == c.deadline || deadline == 0 || (c.deadline != 0 && deadline > c.deadline && deadline > block.timestamp), "Only extend or unlimited");
         _unlock(c); // Eligibility already earned survives increased targets/extensions.
         c.target = target;
         c.deadline = deadline;
         emit TermsUpdated(id, target, deadline);
+    }
+    /// @notice Close fundraising permanently. Ending the campaign makes its
+    /// remaining funds eligible for the same signed, creator-only claims.
+    function endCampaign(bytes32 id) external {
+        Campaign storage c = _campaign(id);
+        require(msg.sender == c.creator && !c.cancelled && !ended[id], "Only active creator");
+        ended[id] = true;
+        c.unlocked = true;
+        emit CampaignEnded(id);
     }
     function claim(Withdrawal calldata w, bytes calldata validatorSignature, bytes calldata adminSignature) external nonReentrant {
         Campaign storage c = _campaign(w.campaignId);

@@ -36,11 +36,15 @@ export async function chainSnapshot(p: any) {
   if (!block) throw new Error("Blockchain is unavailable.");
   if (!(await contract.exists(id, { blockTag: block.number }))) return null;
   const c = await contract.getCampaign(id, { blockTag: block.number });
+  let supportsEnd = false;
+  try { supportsEnd = typeof contract.campaignLifecycleVersion === "function" && await contract.campaignLifecycleVersion({blockTag:block.number}) === 1n; }
+  catch (error: any) { if (error?.code !== "CALL_EXCEPTION") throw error; }
+  const ended = supportsEnd ? Boolean(await contract.ended(id, {blockTag:block.number})) : false;
   if (!p.registration || getAddress(c.creator) !== getAddress(p.recipientWallet) || getAddress(c.validator) !== getAddress(p.registration.validator) || getAddress(c.reviewerAdmin) !== getAddress(p.registration.reviewerAdmin)) throw new Error("Registered creator/reviewers do not match this approved proposal.");
   return {
     campaignId: id, creator: String(c.creator), validator: String(c.validator), reviewerAdmin: String(c.reviewerAdmin),
     target: String(c.target), deadline: Number(c.deadline), totalRaised: String(c.totalRaised), totalWithdrawn: String(c.totalWithdrawn), totalRefunded: String(c.totalRefunded),
-    available: (c.totalRaised-c.totalWithdrawn-c.totalRefunded).toString(), nonce: String(c.nonce), cancelled: Boolean(c.cancelled),
+    available: (c.totalRaised-c.totalWithdrawn-c.totalRefunded).toString(), nonce: String(c.nonce), cancelled: Boolean(c.cancelled), ended, supportsEnd,
     eligible: !c.cancelled && (c.unlocked || c.totalRaised >= c.target || (c.deadline !== 0n && BigInt(block.timestamp) >= c.deadline)),
     blockNumber: block.number, timestamp: block.timestamp,
   };
@@ -55,7 +59,7 @@ async function reviewer(p: any, user: any, wallet: string, role: "validator" | "
 export async function prepareRegistration(p: any) {
   p = await ensureApprovalPolicy(p);
   const policy = await readApprovalPolicy(p);
-  if (!proposalApproved(policy,p) || p.status === "Rejected") throw new Error("All required proposal reviews must be completed first.");
+  if (!proposalApproved(policy,p) || p.status !== "Approved" || p.ended) throw new Error("All required proposal reviews must be completed first, and the proposal must still be open.");
   if (await chainSnapshot(p)) throw new Error("Already registered. Synchronize the registration transaction.");
   if (!policy.requireValidator || !policy.requireAdmin) {
     const supportsPolicy = async (proposal: any) => {
@@ -90,13 +94,22 @@ export async function prepareRegistration(p: any) {
 }
 export async function signRegistration(p: any, user: any, role: "validator" | "admin", signature: string) {
   const message = registrationMessage(p);
-  if (message.validUntil <= Math.floor(Date.now()/1000) || p.blockchainStatus !== "PENDING") throw new Error("Registration authorization expired or was already used.");
+  if (message.validUntil <= Math.floor(Date.now()/1000) || p.blockchainStatus !== "PENDING" || p.status !== "Approved" || p.ended) throw new Error("Registration authorization expired, was used, or the proposal is closed.");
   const wallet = role === "validator" ? message.validator : message.reviewerAdmin;
   await reviewer(p,user,wallet,role);
   if (getAddress(verifyTypedData(domainFor(p),registrationTypes,message,signature)) !== getAddress(wallet)) throw new Error("Invalid registration signature.");
-  const result = await Proposal.updateOne({_id:p._id,contractAddress:p.contractAddress,blockchainStatus:"PENDING","registration.validUntil":message.validUntil,"registration.validator":message.validator,"registration.reviewerAdmin":message.reviewerAdmin},{$set:{[`registration.${role === "validator" ? "validatorSignature" : "adminSignature"}`]:signature}});
+  const result = await Proposal.updateOne({_id:p._id,contractAddress:p.contractAddress,blockchainStatus:"PENDING",status:"Approved",ended:{$ne:true},"registration.validUntil":message.validUntil,"registration.validator":message.validator,"registration.reviewerAdmin":message.reviewerAdmin},{$set:{[`registration.${role === "validator" ? "validatorSignature" : "adminSignature"}`]:signature}});
   if (!result.matchedCount) throw new Error("Registration changed. Refresh and sign again.");
 }
+export async function endDraft(p: any, user: any, group: any) {
+  if (String(p.creatorId) !== String(user._id)) throw new Error("Only the creator can end this proposal.");
+  if (p.blockchainStatus !== "PENDING" || await chainSnapshot(p)) throw new Error("End the registered campaign with the creator wallet.");
+  if (p.registration?.validatorSignature || p.registration?.adminSignature) throw new Error("This proposal already has registration signatures. Register it first, then end its campaign on-chain.");
+  const result = await Proposal.updateOne({_id:p._id,blockchainStatus:"PENDING",status:{$in:["Pending","Validated","Approved"]},"registration.validatorSignature":{$in:[null,""]},"registration.adminSignature":{$in:[null,""]}},{$set:{status:"Ended",ended:true},$unset:{registration:1}});
+  if (!result.matchedCount) throw new Error("Proposal changed or was already closed. Refresh and try again.");
+  await History.create({organizationId:group.organizationId,groupId:p.groupId,proposalId:p._id,userId:String(user._id),type:"PROPOSAL",title:"Proposal ended",description:`${p.title} was ended by its creator before fundraising.`});
+}
+
 export async function requestWithdrawal(p: any, amount: bigint) {
   await WithdrawalRequest.init();
   const c = await chainSnapshot(p);
@@ -153,7 +166,7 @@ export async function syncV2(p: any, txHash: string, group: any) {
   }
   // Monotonic snapshots prevent a slower request overwriting newer balances.
   await Proposal.updateOne({_id:p._id,$or:[{v2SyncedBlock:{$exists:false}},{v2SyncedBlock:{$lte:c.blockNumber}}]},{$set:{
-    blockchainStatus:c.cancelled?"CANCELLED":"APPROVED",status:c.cancelled?"Cancelled":"Funding",v2SyncedBlock:c.blockNumber,
+    blockchainStatus:c.cancelled?"CANCELLED":"APPROVED",status:c.cancelled?"Cancelled":c.ended?"Ended":"Funding",ended:c.ended,v2SyncedBlock:c.blockNumber,
     targetAmountAtomic:c.target,targetAmount:formatEther(c.target),deadline:c.deadline?new Date(c.deadline*1000):null,unlimited:c.deadline===0,
     fundedAmountAtomic:c.totalRaised,fundedAmount:formatEther(c.totalRaised),releasedAmountAtomic:c.totalWithdrawn,releasedAmount:formatEther(c.totalWithdrawn),
     refundedAmountAtomic:c.totalRefunded,refundedAmount:formatEther(c.totalRefunded),availableAmountAtomic:c.available,
@@ -167,7 +180,7 @@ export async function syncV2(p: any, txHash: string, group: any) {
       const field=event.name === "Donated"?"transactions":"refunds";
       await Proposal.updateOne({_id:p._id,[`${field}.txHash`]:{$ne:txHash}},{$push:{[field]:{amount:formatEther(amount),amountAtomic:amount,donor:String(event.args.donor),txHash}}});
     }
-    const names:Record<string,string>={CampaignRegistered:"PROPOSAL",Donated:"DONATION",Claimed:"RELEASE",TermsUpdated:"PROPOSAL",CampaignCancelled:"CANCEL",Refunded:"REFUND"};
+    const names:Record<string,string>={CampaignRegistered:"PROPOSAL",Donated:"DONATION",Claimed:"RELEASE",TermsUpdated:"PROPOSAL",CampaignCancelled:"CANCEL",CampaignEnded:"PROPOSAL",Refunded:"REFUND"};
     const key=`v2:${p.chainId}:${p.contractAddress.toLowerCase()}:${txHash.toLowerCase()}:${event.name}`;
     try { await History.updateOne({blockchainEventKey:key},{$setOnInsert:{organizationId:group.organizationId,groupId:p.groupId,proposalId:p._id,userId:tx.from,type:names[event.name],title:`${p.title}: ${event.name}`,amount:formatEther(amount),amountAtomic:amount,txHash,blockchainEventKey:key}},{upsert:true}); } catch(error:any) { if(error?.code!==11000)throw error; }
   }

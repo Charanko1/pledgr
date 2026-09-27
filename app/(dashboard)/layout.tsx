@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import DashboardProviders from "@/components/layout/DashboardProviders";
 import MainSidebar from "@/components/layout/MainSidebar";
 import Header from "@/components/layout/Header";
+import BackButton from "@/components/ui/BackButton";
 import styles from "@/components/layout/DashboardShell.module.css";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -11,7 +12,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       <MainSidebar />
       <div className={styles.workspace}>
         <Header />
-        <main id="main-content" tabIndex={-1} className={styles.content}>{children}</main>
+        <main id="main-content" tabIndex={-1} className={styles.content}><BackButton />{children}</main>
         <footer className={styles.footer}><span>A little kindness. A collective superpower.</span><span>PLEDGR / BUILT TOGETHER</span></footer>
       </div>
     </div>

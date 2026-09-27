@@ -19,7 +19,7 @@ type State = {
   withdrawalTypes: Record<string,TypedDataField[]>;
   registration: {message:any;validatorSignature:string;adminSignature:string}|null;
   withdrawal: {message:any;status:string;validUntil:number;requestId:string;validatorSignature:string;adminSignature:string}|null;
-  chain: {campaignId:string;creator:string;validator:string;reviewerAdmin:string;target:string;deadline:number;totalRaised:string;totalWithdrawn:string;totalRefunded:string;available:string;nonce:string;cancelled:boolean;eligible:boolean;timestamp:number}|null;
+  chain: {campaignId:string;creator:string;validator:string;reviewerAdmin:string;target:string;deadline:number;totalRaised:string;totalWithdrawn:string;totalRefunded:string;available:string;nonce:string;cancelled:boolean;ended?:boolean;supportsEnd?:boolean;eligible:boolean;timestamp:number}|null;
   permissions:{isCreator:boolean;isAdmin:boolean;isValidator:boolean};
   wallet:string;serverTime:number;
 };
@@ -60,6 +60,7 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
   const creator=s.permissions.isCreator;
   const policy=s.policy || {version:0,creatorRole:"Member" as const,requireAdmin:true,requireValidator:true};
   const proposalStatus=s.proposalStatus || p.status;
+  const ended=c?Boolean(c.ended):proposalStatus==="Ended";
   const contractAddress=String(s.domain.verifyingContract || p.contractAddress);
   const claimPolicy=c?{...policy,requireValidator:required(c.validator),requireAdmin:required(c.reviewerAdmin)}:policy;
   const registrationReady=Boolean(r&&(!required(r.message.validator)||r.validatorSignature)&&(!required(r.message.reviewerAdmin)||r.adminSignature));
@@ -110,7 +111,8 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
     <header className="pledgr-hero p-6 space-y-3"><p className="pledgr-eyebrow">Community funding · V2</p><h1 className="text-3xl font-bold">{p.title}</h1><p>{p.description}</p><p className="text-sm break-all">Creator: {p.creator} · {p.recipientWallet}</p></header>
     {message&&<p role="status" className="border-2 border-foreground bg-lime p-4 break-words">{message}</p>}
     <fieldset disabled={busy} aria-busy={busy} className="space-y-6 min-w-0">
-      {!c&&<section className={panel}>
+      {ended&&<section className={`${panel} bg-lime`}><h2 className="text-xl font-bold">Fundraising finished</h2><p>New donations are closed.{c&&BigInt(c.available)>0n?" The creator can still request and claim the remaining funds with the required approvals.":" Thank you for being part of this proposal."}</p></section>}
+      {!c&&!ended&&<section className={panel}>
         <h2 className="text-xl font-bold">Creator registration</h2>
         <p>Proposal status: {proposalStatus}. Required approvals: {approvalLabel(policy)}. Required reviewers authorize the campaign without gas. The creator then registers it in one transaction; funding opens immediately.</p>
         <div className="flex flex-wrap gap-3">
@@ -122,14 +124,15 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
         </div>
         {creator&&<p className="text-sm">As the creator, you register the campaign and request and claim its funds. Other required reviewers approve it.</p>}
         {r&&<p className="text-sm">Validator: {signatureStatus(r.message.validator,r.validatorSignature)} · Admin: {signatureStatus(r.message.reviewerAdmin,r.adminSignature)}. Authorization expires {new Date(r.message.validUntil*1000).toLocaleString()}.</p>}
+        {creator&&["Pending","Validated","Approved"].includes(proposalStatus)&&<button className="pledgr-action px-4 py-2 bg-white" onClick={()=>{if(window.confirm("End this proposal before fundraising? It will move to Finished."))void run(()=>post({action:"endDraft"}),"Proposal ended.");}}>End proposal</button>}
       </section>}
       {c&&<>
         <section className={panel}><h2 className="text-xl font-bold">Funding overview</h2>
           <div className="grid sm:grid-cols-3 gap-4"><div><p>Total collected</p><strong className="text-2xl">{formatEther(c.totalRaised)} BOT</strong></div><div><p>Withdrawn</p><strong className="text-2xl">{formatEther(c.totalWithdrawn)} BOT</strong></div><div><p>Available</p><strong className="text-2xl">{formatEther(c.available)} BOT</strong></div></div>
           <p>Target: {formatEther(c.target)} BOT · Deadline: {c.deadline?new Date(c.deadline*1000).toLocaleString():"Unlimited"}</p>
-          <p>{c.cancelled?"Campaign cancelled. Donors may claim refunds.":"Donations remain open after the deadline and after reaching the target."}</p>
+          <p>{c.cancelled?"Campaign cancelled. Donors may claim refunds.":ended?"This proposal has ended. Donations are closed.":"Donations remain open after the deadline and after reaching the target."}</p>
         </section>
-        {!c.cancelled&&<section className={panel}><h2 className="text-xl font-bold">Contribute BOT</h2>
+        {!c.cancelled&&!ended&&<section className={panel}><h2 className="text-xl font-bold">Contribute BOT</h2>
           <label className="block">Donation amount (BOT)<input className={input} inputMode="decimal" value={donation} onChange={e=>setDonation(e.target.value)}/></label>
           <button className={button} onClick={()=>void run(async()=>{const value=parseEther(donation);if(value<=0n)throw new Error("Enter a positive amount.");await v2Transaction(p._id,p.contractAddress!,"donate",contract=>contract.donate(c.campaignId,{value}));},"Donation confirmed.")}>Donate BOT</button>
         </section>}
@@ -146,16 +149,20 @@ export default function V2Proposal({proposal:p}:{proposal:Proposal}) {
           </div>}
           <p className="text-sm text-gray-600">Signing approvals opens a MetaMask signature prompt but costs no gas. Claiming opens a transaction prompt.</p>
         </section>}
-        {creator&&!c.cancelled&&<section className={panel}><h2 className="text-xl font-bold">Keep fundraising</h2><p>Increase the target, extend the deadline, or switch to unlimited. Collected and withdrawn balances stay intact. Withdrawal eligibility already earned is preserved.</p>
+        {creator&&!c.cancelled&&!ended&&<section className={panel}><h2 className="text-xl font-bold">Keep fundraising</h2><p>Increase the target, extend the deadline, or switch to unlimited. Collected and withdrawn balances stay intact. Withdrawal eligibility already earned is preserved.</p>
           <label className="block">New target (BOT, optional)<input className={input} inputMode="decimal" value={target} onChange={e=>setTarget(e.target.value)} placeholder={formatEther(c.target)}/></label>
           {c.deadline!==0&&<><label className="block">Extend deadline (optional)<input type="datetime-local" disabled={unlimited||busy} className={input} value={deadline} onChange={e=>setDeadline(e.target.value)}/></label><label className="flex gap-2"><input type="checkbox" checked={unlimited} onChange={e=>setUnlimited(e.target.checked)}/> Switch to unlimited</label></>}
           <button className={button} onClick={()=>void run(updateTerms,"Campaign terms updated.")}>Update campaign terms</button><p className="text-sm text-gray-600">This changes the public contract state and requires a transaction.</p>
           {BigInt(c.totalWithdrawn)===0n&&<button className="pledgr-action px-4 py-2 bg-red-600 text-white" onClick={()=>{if(window.confirm("Cancel this campaign and enable donor refunds?"))void run(async()=>{await signer(c.creator);await v2Transaction(p._id,p.contractAddress!,"cancel",contract=>contract.cancel(c.campaignId));});}}>Cancel campaign</button>}
         </section>}
+        {creator&&!c.cancelled&&!ended&&<section className={panel}><h2 className="text-xl font-bold">Ready to wrap up?</h2><p>End this proposal to permanently close donations and move it to Finished. Your remaining balance stays available for requests and claims with the same required approvals.</p>
+          {c.supportsEnd?<button className="pledgr-action px-4 py-2 bg-foreground text-white" onClick={()=>{if(window.confirm("Permanently end fundraising? Donations will stop. Remaining funds can still be claimed with approval."))void run(async()=>{await signer(c.creator);await v2Transaction(p._id,contractAddress,"end",contract=>contract.endCampaign(c.campaignId));},"Proposal ended. Remaining funds are still claimable.");}}>End proposal</button>:<p className="text-sm text-muted">This proposal uses an older contract that cannot end fundraising while keeping claims open. New proposals on the updated contract support this feature.</p>}
+          {c.supportsEnd&&<p className="text-sm text-muted">Confirming the end of fundraising requires a wallet transaction.</p>}
+        </section>}
         {c.cancelled&&<section className={panel}><h2 className="text-xl font-bold">Donor refunds</h2><button className={button} onClick={()=>void run(()=>v2Transaction(p._id,p.contractAddress!,"refund",contract=>contract.refund(c.campaignId)),"Refund confirmed.")}>Claim my refund</button></section>}
         <section className={panel}><h2 className="text-xl font-bold">Recent donations</h2>{p.transactions?.length?p.transactions.slice(-10).reverse().map(tx=><p key={tx.txHash}><a className="underline break-all" href={getExplorerTxUrl(tx.txHash)} target="_blank" rel="noreferrer">{formatEther(tx.amountAtomic)} BOT · {tx.donor}</a></p>):<p>No synchronized donations yet.</p>}</section>
       </>}
-      <details className={panel}><summary className="font-bold cursor-pointer">Sync confirmed transaction</summary><p>Paste a successful registration, donation, claim, terms update, cancellation, or refund hash if the page has not caught up.</p><label className="block">Transaction hash<input className={input} value={hash} onChange={e=>setHash(e.target.value)} placeholder="0x…"/></label><button className={button} onClick={()=>void run(()=>post({action:"sync",txHash:hash.trim()}),"Transaction synchronized.")}>Sync transaction</button></details>
+      <details className={panel}><summary className="font-bold cursor-pointer">Sync confirmed transaction</summary><p>Paste a successful registration, donation, claim, ending, terms update, cancellation, or refund hash if the page has not caught up.</p><label className="block">Transaction hash<input className={input} value={hash} onChange={e=>setHash(e.target.value)} placeholder="0x…"/></label><button className={button} onClick={()=>void run(()=>post({action:"sync",txHash:hash.trim()}),"Transaction synchronized.")}>Sync transaction</button></details>
     </fieldset>
     {busy&&<p role="status">Waiting for confirmation…</p>}
   </div>;

@@ -27,11 +27,13 @@
 .story { background: var(--lime); border-right: 2px solid var(--ink); padding: 48px clamp(30px, 5vw, 88px) 32px; display: flex; flex-direction: column; align-items: flex-start; }
 .eyebrow { display: flex; align-items: center; gap: 10px; }
 .eyebrow svg { flex-shrink: 0; }
-.headline { font-size: clamp(3.75rem, 6.25vw, 6.25rem); letter-spacing: -.06em; line-height: 1.04; margin: 31px 0 22px; font-weight: 800; }
+.headline { font-size: clamp(2.7rem, 4.3vw, 4.7rem); letter-spacing: -.06em; line-height: 1.06; margin: 31px 0 24px; font-weight: 800; }
 .you { display: inline-flex; align-items: center; gap: 20px; position: relative; }
 .you::after { content: ''; position: absolute; bottom: -3px; left: 0; right: 0; height: 5px; background: var(--ink); transform: rotate(-3deg); }
 .you svg { width: .85em; height: .85em; color: var(--purple); }
 .intro { font-size: 1.125rem; line-height: 1.6; margin: 0 0 32px; }
+.aboutCopy { font-size: 1rem; line-height: 1.75; margin: -12px 0 32px; max-width: 560px; }
+.communityCard .cardDescription { font-size: .95rem; line-height: 1.65; }
 .communityCard { background: var(--paper); border: 2px solid var(--ink); box-shadow: 7px 7px 0 var(--ink); padding: 20px 23px; width: 100%; max-width: 420px; transform: rotate(-2deg); margin: 0 0 34px; }
 .cardTop { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: .75rem; letter-spacing: .06em; font-weight: 700; }
 .cardTop svg { color: var(--purple); flex-shrink: 0; }
@@ -86,7 +88,7 @@
   .main { display: flex; flex-direction: column; min-height: 0; }
   .formSide { order: 0; padding: 35px 26px 40px; }
   .story { order: 1; border-right: 0; border-top: 2px solid var(--ink); padding: 34px 28px; }
-  .headline { font-size: clamp(2.75rem, 10vw, 3.625rem); margin: 24px 0 20px; }
+  .headline { font-size: clamp(2rem, 7.5vw, 3.625rem); margin: 24px 0 20px; }
   .intro { font-size: 1rem; }
   .communityCard { max-width: 440px; margin-bottom: 30px; }
   .formHeading h1 { font-size: 2.75rem; }

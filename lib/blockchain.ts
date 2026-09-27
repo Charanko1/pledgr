@@ -54,7 +54,7 @@ function assertContractAddress() {
   }
 }
 
-async function ensureChain() {
+export async function ensureChain() {
   const current = await window.ethereum.request({ method: "eth_chainId" });
   if (current === BOT_CHAIN.chainId) return;
 
@@ -77,6 +77,9 @@ async function ensureChain() {
 }
 
 export async function getProvider() {
+  if (localStorage.getItem("pledgr:wallet-disconnected") === "true") {
+    throw new Error("Your wallet is disconnected. Connect it before continuing.");
+  }
   if (!window.ethereum) {
     throw new Error("Please install MetaMask.");
   }

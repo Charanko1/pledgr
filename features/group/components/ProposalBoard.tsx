@@ -8,6 +8,7 @@ import type { CreateProposalData, GroupData, GroupRole, Proposal } from "@/types
 import { useWallet } from "@/context/WalletContext";
 import { useProfile } from "@/features/profile/hooks/useProfile";
 import { formatBotAmount, fundingPercentage } from "@/lib/bot";
+import { isFinishedProposal } from "@/lib/proposal-state";
 
 const CreateProposalModal = dynamic(() => import("@/features/proposal/components/CreateProposalModal"));
 
@@ -42,9 +43,13 @@ export default function ProposalBoard({
   onRegisterOnChain, onActivateFunding, onRequestWithdrawal, onWithdrawalReview, onRelease, onCancel,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"ongoing" | "finished">("ongoing");
   const { address, connectWallet, connecting } = useWallet();
   const { profile } = useProfile();
   const list = Array.isArray(proposals) ? proposals : [];
+  const finishedList = list.filter(isFinishedProposal);
+  const ongoingList = list.filter(proposal => !isFinishedProposal(proposal));
+  const visible = view === "ongoing" ? ongoingList : finishedList;
   const isAdmin = currentRole === "Admin";
   const isValidator = currentRole === "Validator";
 
@@ -64,9 +69,13 @@ export default function ProposalBoard({
         <button onClick={() => void openCreate()} disabled={connecting} className="bg-primary text-white px-4 py-2 rounded-none flex items-center gap-2 hover:bg-primary-hover disabled:bg-gray-400 pledgr-action"><Plus size={18} />{connecting ? "Connecting…" : "New Proposal"}</button>
       </div>
 
-      {list.length === 0 ? <div className="bg-white border p-8 text-center text-gray-500 shadow-brutal">No proposal yet.</div> : (
+      <div className="flex flex-wrap gap-3" role="group" aria-label="Proposal status filter">
+        <button className={`pledgr-action px-4 py-2 font-semibold ${view === "ongoing" ? "bg-lime" : "bg-white"}`} aria-pressed={view === "ongoing"} onClick={() => setView("ongoing")}>Ongoing ({ongoingList.length})</button>
+        <button className={`pledgr-action px-4 py-2 font-semibold ${view === "finished" ? "bg-lime" : "bg-white"}`} aria-pressed={view === "finished"} onClick={() => setView("finished")}>Finished ({finishedList.length})</button>
+      </div>
+      {visible.length === 0 ? <div className="bg-white border-2 border-foreground p-8 text-center text-gray-500 shadow-brutal">{view === "ongoing" ? "No ongoing proposals. Start something good with a new proposal." : "No finished proposals yet. Ended, cancelled, rejected, and fully released legacy proposals appear here."}</div> : (
         <div className="space-y-4">
-          {list.map((proposal) => {
+          {visible.map((proposal) => {
             const percentage = fundingPercentage(proposal.fundedAmountAtomic || "0", proposal.targetAmountAtomic || "0");
             const isCreator = Boolean(currentUserId && proposal.creatorId && String(proposal.creatorId) === String(currentUserId)) || Boolean(profile?._id && proposal.creatorId && String(proposal.creatorId) === String(profile._id));
             const canCancel = (isCreator || isAdmin) && !["RELEASED", "CANCELLED"].includes(proposal.blockchainStatus || "") && proposal.status !== "Released" && proposal.status !== "Cancelled";
@@ -82,6 +91,7 @@ export default function ProposalBoard({
                 <div className="mt-5"><div className="flex justify-between text-sm mb-2"><span>{formatBotAmount(proposal.fundedAmountAtomic || "0")} / {formatBotAmount(proposal.targetAmountAtomic || "0")} BOT</span><span>{percentage}%</span></div><div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-primary transition-all" style={{ width: `${percentage}%` }} /></div></div>
 
                 <p className="mt-3 text-xs text-gray-500">Blockchain: {proposal.blockchainStatus || "PENDING"} · Deadline: {proposal.unlimited ? "Unlimited" : new Date(proposal.deadline).toLocaleDateString()}</p>
+                {(proposal.ended || proposal.status === "Ended") && <p className="mt-3 text-sm font-semibold">Fundraising ended · {formatBotAmount(proposal.availableAmountAtomic || "0")} BOT remains available for approved creator claims.</p>}
                 <div className="mt-5 flex gap-2 flex-wrap">
                   <Link href={`/organization/${orgId}/groups/${groupId}/proposal/${proposal._id}`} className="bg-primary text-white px-4 py-2 pledgr-action">View Detail</Link>
 

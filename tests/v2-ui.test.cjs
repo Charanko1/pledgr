@@ -10,7 +10,7 @@ const atom='1000000000000000000';
 function render(overrides={}){
   const state={domain:{chainId:968,verifyingContract:wallet},registrationTypes:{},withdrawalTypes:{},registration:null,withdrawal:null,wallet,
     permissions:{isCreator:true,isAdmin:false,isValidator:false},serverTime:100,
-    chain:{campaignId:'0x'+'a'.repeat(64),creator:wallet,validator,reviewerAdmin:admin,target:atom,deadline:0,totalRaised:atom,totalWithdrawn:'0',totalRefunded:'0',available:atom,nonce:'0',cancelled:false,eligible:true,timestamp:100},...overrides};
+    chain:{campaignId:'0x'+'a'.repeat(64),creator:wallet,validator,reviewerAdmin:admin,target:atom,deadline:0,totalRaised:atom,totalWithdrawn:'0',totalRefunded:'0',available:atom,nonce:'0',cancelled:false,eligible:true,timestamp:100,ended:Boolean(overrides.ended),supportsEnd:true},...overrides};
   const mocks={
     '@tanstack/react-query':{useQuery:()=>({data:state,isPending:false}),useQueryClient:()=>({})},
     '@/lib/api-client':{},'@/lib/blockchain':{},'@/lib/v2/client':{},'@/components/ui/ContentState':{},
@@ -53,4 +53,15 @@ test('creator can register with its single required signature and sees exempt ro
   const html=render({chain:null,registration,proposalStatus:'Approved',policy:{version:1,creatorRole:'Admin',requireAdmin:false,requireValidator:true}});
   assert.match(html,/Register my campaign/);assert.match(html,/Admin: not required/);assert.match(html,/Validator only/);
   assert.doesNotMatch(render({chain:null,registration:{...registration,validatorSignature:''}}),/Register my campaign/);
+});
+
+test('ended proposal hides donating and terms but preserves creator withdrawal controls',()=>{
+  const html=render({ended:true});assert.match(html,/Fundraising finished/);assert.match(html,/Request withdrawal/);
+  assert.doesNotMatch(html,/Donate BOT|Update campaign terms|>End proposal</);
+  const member=render({ended:true,permissions:{isCreator:false,isAdmin:false,isValidator:false}});assert.doesNotMatch(member,/Request withdrawal|>End proposal</);
+});
+
+test('only creator of an open proposal sees the end control',()=>{
+  assert.match(render(),/>End proposal</);
+  assert.doesNotMatch(render({permissions:{isCreator:false,isAdmin:true,isValidator:false}}),/>End proposal</);
 });

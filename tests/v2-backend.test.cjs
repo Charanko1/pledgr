@@ -42,11 +42,11 @@ function fixture(options={}){
     },
   };
   const mocks={
-    ethers:{...ethers,Contract:class{async exists(){return options.exists!==false;}async getCampaign(){return chain;}async approvalPolicyVersion(){return options.capability===false?0n:1n;}}},
+    ethers:{...ethers,Contract:class{async exists(){return options.exists!==false;}async getCampaign(){return chain;}async approvalPolicyVersion(){return options.capability===false?0n:1n;}async campaignLifecycleVersion(){if(options.lifecycleError)throw options.lifecycleError;return options.lifecycle?1n:0n;}async ended(){return Boolean(options.ended);}}},
     '@/lib/blockchain-server':{BOT_CHAIN_ID:968,getServerProvider:()=>({getBlock:async()=>({number:100,timestamp:now})})},
     '@/lib/authorization':{getGroupAccess:async(group,user)=>({allowed:allow,isValidator:user==='validator',isGroupAdmin:user==='admin'})},
     '@/models/Proposal':{findById:async()=>p,updateOne:async(filter,update)=>{Object.assign(p,update.$set);return {matchedCount:1};}},
-    '@/models/User':{findById:async id=>users[id]},'@/models/History':{},'@/models/WithdrawalRequest':model,
+    '@/models/User':{findById:async id=>users[id]},'@/models/History':{create:async()=>{}},'@/models/WithdrawalRequest':model,
     '@/lib/proposal-approval':{ensureApprovalPolicy:async p=>p,readApprovalPolicy:async p=>p.approvalPolicy},
   };
   const server=load('lib/v2/server.ts',mocks),types=load('lib/v2/typed-data.ts',mocks);
@@ -158,4 +158,24 @@ test('withdrawal API restricts requests to the verified proposal creator, regard
   actor._id='creator';assert.equal((await call()).status,409);assert.equal(requests,0);
   actor.walletAddress=creator.address;assert.equal((await call()).status,200);assert.equal(requests,1);
   actor.walletVerifiedAt=null;assert.equal((await call()).status,409);assert.equal(requests,1);
+});
+
+test('ended campaigns expose closed donations but keep remaining claims eligible',async()=>{
+  const f=fixture({lifecycle:true,ended:true});const snapshot=await f.server.chainSnapshot(f.p);
+  assert.equal(snapshot.ended,true);assert.equal(snapshot.supportsEnd,true);
+  await f.server.requestWithdrawal(f.p,1n);await f.review('admin');await f.review('validator');assert.equal(f.state().w.status,'Approved');
+});
+
+test('legacy lifecycle is distinguished from network errors',async()=>{
+  const f=fixture({lifecycleError:{code:'CALL_EXCEPTION'}});assert.equal((await f.server.chainSnapshot(f.p)).supportsEnd,false);
+  const g=fixture({lifecycleError:new Error('RPC offline')});await assert.rejects(g.server.chainSnapshot(g.p),/RPC offline/);
+});
+
+test('only creator can end an unsigned draft; signatures and on-chain funds prevent off-chain closing',async()=>{
+  const proposal={status:'Pending',blockchainStatus:'PENDING'};
+  const f=fixture({exists:false,proposal});await assert.rejects(f.server.endDraft(f.p,{_id:'other'},{organizationId:'org'}),/Only the creator/);
+  await f.server.endDraft(f.p,{_id:'creator'},{organizationId:'org'});assert.equal(f.p.status,'Ended');
+  const g=fixture({exists:false,proposal:{...proposal,registration:{validatorSignature:'signed'}}});
+  await assert.rejects(g.server.endDraft(g.p,{_id:'creator'},{}),/already has registration signatures/);
+  const h=fixture({proposal});await assert.rejects(h.server.endDraft(h.p,{_id:'creator'},{}),/registered campaign/);
 });

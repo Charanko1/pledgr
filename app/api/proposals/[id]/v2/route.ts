@@ -7,7 +7,7 @@ import { getAuthenticatedUser, AuthenticationError, authErrorResponse } from "@/
 import { getGroupAccess } from "@/lib/authorization";
 import Proposal from "@/models/Proposal";
 import WithdrawalRequest from "@/models/WithdrawalRequest";
-import { chainSnapshot, domainFor, prepareRegistration, registrationMessage, requestWithdrawal, reviewWithdrawal, signRegistration, syncV2, withdrawalMessage } from "@/lib/v2/server";
+import { chainSnapshot, domainFor, endDraft, prepareRegistration, registrationMessage, requestWithdrawal, reviewWithdrawal, signRegistration, syncV2, withdrawalMessage } from "@/lib/v2/server";
 import { registrationTypes, withdrawalTypes } from "@/lib/v2/typed-data";
 
 type Params = { params: Promise<{ id: string }> };
@@ -50,7 +50,9 @@ export async function POST(req:NextRequest,{params}:Params) {
       const chain=await syncV2(p,String(body.txHash||""),access.group);
       return NextResponse.json({chain,message:"Transaction synchronized."});
     }
-    if(body.action==="prepareRegistration") {
+    if(body.action==="endDraft") {
+      await endDraft(p,user,access.group);
+    } else if(body.action==="prepareRegistration") {
       await prepareRegistration(p);
     } else if(body.action==="signRegistration") {
       if(body.role!=="validator"&&body.role!=="admin")throw new Error("Invalid reviewer role.");

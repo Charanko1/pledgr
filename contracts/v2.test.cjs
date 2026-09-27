@@ -121,3 +121,27 @@ test('registration cannot omit all reviewers, use creator as reviewer, or weaken
   await assert.rejects(register({reviewerAdmin:accounts[2].address}));
   await assert.rejects(register({},true));
 });
+
+test('creator can end below target; donations stop and approved partial claims remain available',async()=>{
+  const f=await fixture({target:'10',unlimited:true});await f.donate('1');
+  assert.equal(await f.contract.campaignLifecycleVersion(),1n);
+  assert.equal(await f.contract.withdrawalEligible(f.id),false);
+  const auth=await f.authorize('0.4');
+  await assert.rejects(f.contract.connect(signers[2]).endCampaign(f.id));
+  await (await f.contract.connect(signers[1]).endCampaign(f.id)).wait();
+  assert.equal(await f.contract.ended(f.id),true);assert.equal(await f.contract.withdrawalEligible(f.id),true);
+  await assert.rejects(f.donate('0.1'));
+  await assert.rejects(f.contract.connect(signers[1]).updateTerms(f.id,parseEther('20'),0));
+  await assert.rejects(f.contract.connect(signers[1]).endCampaign(f.id));
+  await assert.rejects(f.claim({...auth,a:'0x'}));
+  await f.claim(auth);await f.claim(await f.authorize('0.6'));
+  assert.equal(await f.contract.available(f.id),0n);assert.equal(await f.contract.ended(f.id),true);
+});
+
+test('ending after a partial payout preserves nonce and remaining funds; cancelled campaigns cannot end',async()=>{
+  const f=await fixture({needsAdmin:false});await f.donate();await f.claim(await f.authorize('0.3'));
+  const auth=await f.authorize('0.7');await (await f.contract.connect(signers[1]).endCampaign(f.id)).wait();
+  assert.equal((await f.contract.getCampaign(f.id)).nonce,auth.w.nonce);await f.claim(auth);
+  const g=await fixture();await (await g.contract.connect(signers[1]).cancel(g.id)).wait();
+  await assert.rejects(g.contract.connect(signers[1]).endCampaign(g.id));
+});

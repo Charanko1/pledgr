@@ -13,7 +13,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { profileKey } from "@/features/profile/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { resetBlockchainCache } from "@/lib/blockchain";
+import { resetBlockchainCache, ensureChain } from "@/lib/blockchain";
 import type { Profile } from "@/types/profile";
 import { BrowserProvider } from "ethers";
 
@@ -22,35 +22,11 @@ type WalletContextType = {
   connecting: boolean;
   error: string;
   connectWallet: () => Promise<string | null>;
+  changeWallet: () => Promise<string | null>;
+  disconnectWallet: () => Promise<void>;
 };
 
 const WalletContext = createContext<WalletContextType | null>(null);
-
-const BOT_CHAIN = {
-  chainId: "0x3C8",
-  chainName: "BOT Chain Testnet",
-  nativeCurrency: { name: "BOT", symbol: "BOT", decimals: 18 },
-  rpcUrls: ["https://rpc.bohr.life"],
-  blockExplorerUrls: ["https://scan.bohr.life"],
-};
-
-async function ensureBotChain() {
-  const current = await window.ethereum.request({ method: "eth_chainId" });
-  if (current === BOT_CHAIN.chainId) return;
-
-  try {
-    await window.ethereum.request({
-      method: "wallet_switchEthereumChain",
-      params: [{ chainId: BOT_CHAIN.chainId }],
-    });
-  } catch (error) {
-    if ((error as { code?: number }).code !== 4902) throw error;
-    await window.ethereum.request({
-      method: "wallet_addEthereumChain",
-      params: [BOT_CHAIN],
-    });
-  }
-}
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
@@ -87,7 +63,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return saved;
   }, [client]);
 
-  const connectWallet = useCallback(async (): Promise<string | null> => {
+  const connect = useCallback(async (chooseAccount = false): Promise<string | null> => {
     if (pending.current) return null;
     if (!window.ethereum) {
       setError("Install MetaMask to connect your wallet.");
@@ -99,15 +75,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setError("");
 
     try {
+      if (chooseAccount) await window.ethereum.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
       const accounts = (await window.ethereum.request({ method: "eth_requestAccounts" })) as string[];
       const walletAddress = accounts[0];
       if (!walletAddress) throw new Error("No wallet account was selected.");
 
-      await ensureBotChain();
+      await ensureChain();
       const provider = new BrowserProvider(window.ethereum);
       await persistWallet(walletAddress, provider);
       const signer = await provider.getSigner();
       const confirmedAddress = await signer.getAddress();
+      if (confirmedAddress.toLowerCase() !== walletAddress.toLowerCase()) throw new Error("Selected account changed during verification. Connect again.");
+      localStorage.removeItem("pledgr:wallet-disconnected");
+      resetBlockchainCache();
       setActiveAddress(confirmedAddress);
       return confirmedAddress;
     } catch (err) {
@@ -127,10 +107,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [persistWallet]);
 
+  const connectWallet = useCallback(() => connect(false), [connect]);
+  const changeWallet = useCallback(() => connect(true), [connect]);
+  const disconnectWallet = useCallback(async () => {
+    if (pending.current) return;
+    pending.current = true; setConnecting(true); setError("");
+    localStorage.setItem("pledgr:wallet-disconnected", "true");
+    setActiveAddress(""); resetBlockchainCache();
+    try {
+      await window.ethereum?.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] });
+    } catch {
+      // Some providers do not expose permission revocation. The app remains
+      // disconnected and explicit reconnection is required before signing.
+    } finally { pending.current = false; setConnecting(false); }
+  }, []);
+
   useEffect(() => {
     if (!window.ethereum) return;
 
     const handleAccountsChanged = (accounts: unknown) => {
+      if (pending.current) return;
       const nextAccounts = accounts as string[];
       resetBlockchainCache();
       if (!activeAddress) return;
@@ -139,6 +135,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
 
     const handleChainChanged = () => {
+      if (pending.current) return;
       resetBlockchainCache();
       setActiveAddress("");
       setError("Network changed. Reconnect MetaMask to PLEDGR on BOT Chain.");
@@ -152,7 +149,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
   }, [activeAddress]);
 
-  const value = useMemo(() => ({ address: activeAddress, connecting, error, connectWallet }), [activeAddress, connecting, error, connectWallet]);
+  const value = useMemo(() => ({ address: activeAddress, connecting, error, connectWallet, changeWallet, disconnectWallet }), [activeAddress, connecting, error, connectWallet, changeWallet, disconnectWallet]);
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
 

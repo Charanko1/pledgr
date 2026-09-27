@@ -34,6 +34,7 @@ export type ProposalStatus =
   | "Validated"
   | "Approved"
   | "Funding"
+  | "Ended"
   | "Withdrawal Requested"
   | "Validator Release Approved"
   | "Release Approved"
@@ -49,6 +50,7 @@ export interface Proposal {
   contractAddress?: string;
   chainId?: number;
   unlimited?: boolean;
+  ended?: boolean;
   availableAmountAtomic?: string;
   _id: string;
   groupId: string;

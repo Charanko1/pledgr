@@ -4,11 +4,11 @@ import { getAddress, isAddress } from "ethers";
 import { connectDB } from "@/lib/mongodb";
 import { getAuthenticatedUser, AuthenticationError, authErrorResponse } from "@/lib/server-auth";
 import User from "@/models/User";
-import Proposal from "@/models/Proposal";
-import Membership from "@/models/Membership";
-import GroupMember from "@/models/GroupMember";
+
+
+
 import { buildWalletMessage } from "@/lib/wallet-verification";
-import { ACTIVE_PROPOSAL_STATUSES } from "@/lib/proposal-state";
+import { assertWalletCanChange } from "@/lib/wallet-change";
 
 const NONCE_TTL_MS = 10 * 60 * 1000;
 
@@ -33,28 +33,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "This wallet is already connected to another account." }, { status: 409 });
     }
 
-    if (user.walletAddress && isAddress(user.walletAddress) && getAddress(user.walletAddress) !== normalized) {
-      const activeProposal = await Proposal.exists({
-        creatorId: user._id,
-        status: { $in: [...ACTIVE_PROPOSAL_STATUSES] },
-      });
-      const userMemberships = await Membership.find({ userId: user._id.toString() }).select("_id").lean();
-      const membershipIds = userMemberships.map((item) => item._id);
-      const validatorMemberships = membershipIds.length
-        ? await GroupMember.find({ membershipId: { $in: membershipIds }, status: "ACTIVE", role: "Validator" }).select("groupId membershipId").lean()
-        : [];
-      if (activeProposal) {
-        return NextResponse.json({ message: "You cannot change your wallet while you have an active fundraising proposal." }, { status: 409 });
-      }
-      if (validatorMemberships.length) {
-        const validatorGroups = validatorMemberships.map((item: any) => item.groupId);
-        const activeValidatorProposal = await Proposal.exists({
-          groupId: { $in: validatorGroups },
-          status: { $in: [...ACTIVE_PROPOSAL_STATUSES] },
-        });
-        if (activeValidatorProposal) return NextResponse.json({ message: "You cannot change your wallet while you are an active validator on groups with proposals in progress." }, { status: 409 });
-      }
-    }
+    try { await assertWalletCanChange(user, normalized); } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "Wallet change is unavailable." }, { status: 409 }); }
 
     const nonce = randomBytes(24).toString("hex");
     user.walletNonce = nonce;

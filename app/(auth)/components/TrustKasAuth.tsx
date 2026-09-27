@@ -28,14 +28,15 @@ function AuthShell({ mode, children }: { mode: "login" | "register"; children: R
 
       <main className={styles.main}>
         <section className={styles.story} aria-label="The PLEDGR community">
-          <div className={styles.eyebrow}><Asterisk size={27} aria-hidden="true" />GOOD IDEAS DESERVE A TEAM.</div>
-          <h2 className={styles.headline}>Big impact.<br />Starts with<br /><span className={styles.you}>you.<ArrowUpRight aria-hidden="true" /></span></h2>
-          <p className={styles.intro}>Back the ideas you believe in.<br />Build something bigger, together.</p>
+          <div className={styles.eyebrow}><Asterisk size={27} aria-hidden="true" />THIS IS PLEDGR.</div>
+          <h2 className={styles.headline}>Small pledges.<br /><span className={styles.you}>Shared impact.<ArrowUpRight aria-hidden="true" /></span></h2>
+          <p className={styles.intro}>Pledgr is a community crowdfunding platform where people come together to fund ideas that matter to them.</p>
+          <p className={styles.aboutCopy}>We bring organizations, creators, and supporters into one shared space. From a local initiative to an ambitious group project, we believe meaningful change starts with people backing one another.</p>
           <div className={styles.communityCard}>
-            <div className={styles.cardTop}><span>THE COMMUNITY EFFECT</span><Asterisk size={28} aria-hidden="true" /></div>
-            <p>A little from each of us.<br /><strong>A lot of good, together.</strong></p>
-            <div className={styles.blocks} aria-hidden="true">{Array.from({ length: 12 }, (_, i) => <span key={i} />)}</div>
-            <div className={styles.cardBottom}><span>Every pledge counts.</span><span>Including yours. ↗</span></div>
+            <div className={styles.cardTop}><span>COMMUNITY AT THE CENTER</span><Asterisk size={28} aria-hidden="true" /></div>
+            <p><strong>Shared purpose.<br />Visible contributions.</strong></p>
+            <p className={styles.cardDescription}>Community review brings people into funding decisions. Blockchain records make contributions and fund releases visible—so support is connected to accountability.</p>
+            <div className={styles.cardBottom}><span>Built around people.</span><span>Backed by BOT Chain. ↗</span></div>
           </div>
           <p className={styles.sideCaption}>COMMUNITY POWERED. BLOCKCHAIN BACKED.</p>
         </section>

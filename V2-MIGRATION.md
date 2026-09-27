@@ -14,6 +14,14 @@ Keep the existing `NEXT_PUBLIC_CONTRACT_ADDRESS` / `TRUSTKAS_CONTRACT_ADDRESS` v
 
 No live deployment or wallet transfer was performed during development. New campaigns use V2; existing funds are not automatically migrated. An old campaign cannot be converted into V2 by editing its database record.
 
+### Ending fundraising
+
+The latest source also exposes `campaignLifecycleVersion() = 1`, `ended(campaignId)`, and creator-only `endCampaign(campaignId)`. Deploy this revision to enable ending registered proposals. Older funded deployments remain pinned to their existing addresses and show an explanation instead of a nonfunctional End button. Their money is not migrated.
+
+Ending permanently rejects new donations and target/deadline updates, moves the proposal to **Finished**, and makes its remaining balance eligible for the usual signed creator claims—even below the target or in unlimited mode. It does not transfer funds, change reviewers, consume a withdrawal nonce, or invalidate already approved claims. The end action is an on-chain transaction. It differs from cancellation, which enables donor refunds before any creator payout.
+
+Creators can end unsigned, unregistered drafts without a transaction. Drafts with any registration signature must be registered and then ended on-chain: a database update cannot revoke a signed registration permit.
+
 ### Role-based revision
 
 Deploy the revised source even if an earlier V2 is already deployed. The revised contract exposes `approvalPolicyVersion() = 1` and supports an exempt reviewer role. The previous V2 bytecode always requires two signatures and cannot implement the single-reviewer cases.
@@ -35,13 +43,13 @@ Only the proposal creator may request or claim funds. Required approvals can arr
 2. Application proposal reviews select the required reviewers according to the table above. Reviewers must use verified wallets distinct from the creator and from each other. Either required role may approve first.
 3. In the proposal detail screen, prepare registration. The selected required reviewers sign the registration terms without gas, in either order. An exempt role is encoded as the zero address and an empty signature. Required signatures cover these reviewer addresses, preventing a creator changing the approved policy or terms.
 4. The creator submits `registerCampaign`. Funding opens immediately; there is no separate on-chain admin activation.
-5. Donations remain open after targets, deadlines, and partial/full claims, until the creator explicitly cancels an unwithdrawn campaign.
+5. Donations remain open after targets, deadlines, and partial/full claims, until the creator ends fundraising or cancels an unwithdrawn campaign.
 6. Once eligible, the creator enters an exact BOT amount and requests withdrawal through the API. This action needs no wallet transaction or signature.
 7. The assigned required reviewers sign the withdrawal using EIP-712 in either order. Approval costs no gas. With only one required role, its signature completes approval.
 8. The creator clicks **Claim X BOT**. One transaction verifies all required signatures, consumes the nonce, updates total withdrawn, and transfers exactly the approved amount to the creator.
 9. A later partial withdrawal requires a fresh request and all required signatures. The already-approved amount cannot be edited at claim time.
 
-The claim is the **only transaction in the withdrawal request/review/claim flow**. Registration, donations, public target/deadline updates, cancellation and donor refunds remain ordinary blockchain transactions. EIP-712 signing still opens a wallet **signature** prompt; it cannot be made prompt-free in MetaMask while retaining explicit wallet consent. No private keys are held by the backend.
+The claim is the **only transaction in the withdrawal request/review/claim flow**. Registration, donations, ending fundraising, public target/deadline updates, cancellation and donor refunds remain ordinary blockchain transactions. EIP-712 signing still opens a wallet **signature** prompt; it cannot be made prompt-free in MetaMask while retaining explicit wallet consent. No private keys are held by the backend.
 
 ## Target, deadline and balances
 
@@ -79,7 +87,7 @@ From the project root:
 npm ci --prefix contracts
 npm run build --prefix contracts
 npm test --prefix contracts
-node --test tests/approval-policy.test.cjs tests/validator-slots.test.cjs tests/v2-backend.test.cjs tests/v2-ui.test.cjs tests/release-flow.test.cjs
+node --test tests/approval-policy.test.cjs tests/validator-slots.test.cjs tests/v2-backend.test.cjs tests/v2-ui.test.cjs tests/release-flow.test.cjs tests/account-features.test.cjs
 npx tsc --noEmit --incremental false
 npm run build -- --webpack
 ```
