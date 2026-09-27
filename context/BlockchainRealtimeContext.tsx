@@ -10,11 +10,7 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import {
-  getRealtimeContract,
-  subscribeToTrustKasEvents,
-  type BlockchainEvent,
-} from "@/lib/blockchain-events";
+import type { BlockchainEvent } from "@/lib/blockchain-events";
 
 interface BlockchainRealtimeContextValue {
   status: "connecting" | "connected" | "disconnected" | "disabled";
@@ -85,7 +81,7 @@ export function BlockchainRealtimeProvider({
   const client = useQueryClient();
   const [status, setStatus] = useState<
     "connecting" | "connected" | "disconnected" | "disabled"
-  >(getRealtimeContract() ? "connecting" : "disabled");
+  >(process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ? "connecting" : "disabled");
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -95,7 +91,7 @@ export function BlockchainRealtimeProvider({
     const connect = async () => {
       if (cancelled) return;
 
-      if (!getRealtimeContract()) {
+      if (!process.env.NEXT_PUBLIC_CONTRACT_ADDRESS) {
         setStatus("disabled");
         return;
       }
@@ -103,6 +99,8 @@ export function BlockchainRealtimeProvider({
       setStatus("connecting");
 
       try {
+        const { subscribeToTrustKasEvents } = await import("@/lib/blockchain-events");
+        if (cancelled) return;
         cleanup = await subscribeToTrustKasEvents({
           onStatus: (nextStatus) => {
             if (!cancelled) setStatus(nextStatus);

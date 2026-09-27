@@ -14,9 +14,10 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { profileKey } from "@/features/profile/hooks/useProfile";
 import { apiClient } from "@/lib/api-client";
-import { resetBlockchainCache, ensureChain } from "@/lib/blockchain";
+let blockchainModule: typeof import("@/lib/blockchain") | undefined;
+function resetBlockchainCache() { blockchainModule?.resetBlockchainCache(); }
 import type { Profile } from "@/types/profile";
-import { BrowserProvider } from "ethers";
+import type { BrowserProvider } from "ethers";
 
 type WalletContextType = {
   address: string;
@@ -81,7 +82,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const walletAddress = accounts[0];
       if (!walletAddress) throw new Error("No wallet account was selected.");
 
-      await ensureChain();
+      const [blockchain, { BrowserProvider }] = await Promise.all([import("@/lib/blockchain"), import("ethers")]);
+      blockchainModule = blockchain;
+      await blockchain.ensureChain();
       const provider = new BrowserProvider(window.ethereum);
       await persistWallet(walletAddress, provider);
       const signer = await provider.getSigner();

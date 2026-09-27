@@ -21,7 +21,7 @@ export default function GroupList({
   onJoin,
 }: Props) {
   return (
-    <div className="bg-white rounded-none border p-6 shadow-brutal">
+    <div className="bg-white rounded-none border min-w-0 p-4 sm:p-6 shadow-brutal">
       <div className="flex flex-wrap gap-3 justify-between mb-5">
         <div>
           <h2 className="text-xl font-bold">Organization Groups</h2>
@@ -31,7 +31,7 @@ export default function GroupList({
         </div>
 
         {myRole === "Admin" && (
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={onOpenRequests}
               className="border px-4 py-2 rounded-none shadow-brutal"
@@ -54,7 +54,7 @@ export default function GroupList({
         {groups.map((group) => (
           <div
             key={group._id}
-            className="border rounded-none p-5 shadow-brutal"
+            className="min-w-0 break-words border rounded-none p-4 sm:p-5 shadow-brutal"
           >
             <div className="flex flex-wrap gap-3 justify-between">
               <div>
