@@ -1,13 +1,15 @@
+import { BOT_NETWORK } from "@/lib/network";
 import { Contract, Interface, JsonRpcProvider, isAddress } from "ethers";
 import ABI from "@/lib/abi/TrustKasTreasury.json";
 import { BLOCKCHAIN_POLLING_INTERVAL_MS } from "@/lib/realtime";
 
-const DEFAULT_RPC_URL = "https://rpc.bohr.life";
-const DEFAULT_CHAIN_ID = 968;
+const DEFAULT_RPC_URL = BOT_NETWORK.rpcUrl;
+const DEFAULT_CHAIN_ID = BOT_NETWORK.chainId;
 
 function getConfiguredChainId() {
   const parsed = Number(process.env.BOT_CHAIN_ID || process.env.NEXT_PUBLIC_BOT_CHAIN_ID || DEFAULT_CHAIN_ID);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_CHAIN_ID;
+  if (parsed !== BOT_NETWORK.chainId) throw new Error("Server and browser BOT chain IDs must match.");
+  return parsed;
 }
 
 export const BOT_CHAIN_ID = getConfiguredChainId();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
+import { BOT_NETWORK } from "@/lib/network";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -11,7 +12,7 @@ import styles from "./TrustKasAuth.module.css";
 
 function AuthShell({ mode, children }: { mode: "login" | "register"; children: ReactNode }) {
   const contractAddress = process.env.NEXT_PUBLIC_PLEDGR_V2_ADDRESS || "";
-  const explorer = process.env.NEXT_PUBLIC_BOT_EXPLORER_URL || "https://scan.bohr.life";
+  const explorer = process.env.NEXT_PUBLIC_BOT_EXPLORER_URL || BOT_NETWORK.explorerUrl;
   const contractUrl = /^0x[0-9a-fA-F]{40}$/.test(contractAddress) && /^https:\/\//.test(explorer)
     ? explorer.replace(/\/$/, "") + "/address/" + contractAddress : null;
   const isRegister = mode === "register";
@@ -39,12 +40,12 @@ function AuthShell({ mode, children }: { mode: "login" | "register"; children: R
           <p className={styles.aboutCopy}>Built around people. With community-led decisions and contributions recorded on the blockchain, every pledge is part of a shared story.</p>
           <div className={styles.sponsorCard}>
             <p className={styles.sponsorLabel}>POWERED BY INFRASTRUCTURE</p>
-            <div className={styles.sponsorBrand}><Image src="/bot-chain.png" alt="" width={56} height={56} /><strong>BOT CHAIN</strong><span>TESTNET</span></div>
+            <div className={styles.sponsorBrand}><Image src="/bot-chain.png" alt="" width={56} height={56} /><strong>BOT CHAIN</strong><span>{BOT_NETWORK.label}</span></div>
             {contractUrl ? <a className={styles.contractLink} href={contractUrl} target="_blank" rel="noopener noreferrer">
               <span>View smart contract on explorer <ArrowUpRight size={18} aria-hidden="true" /></span>
               <code>{contractAddress}</code>
               <span className={styles.linkHint}>Opens in a new tab</span>
-            </a> : <p className={styles.linkHint}>Contract details will appear once configured.</p>}
+            </a> : <p className={styles.linkHint}>Mainnet contract deployment is being prepared.</p>}
           </div>
           <p className={styles.sideCaption}>COMMUNITY POWERED. BLOCKCHAIN BACKED.</p>
         </section>

@@ -1,9 +1,10 @@
+import { BOT_NETWORK } from "@/lib/network";
 import { Contract, EventLog, Interface, JsonRpcProvider } from "ethers";
 import ABI from "@/lib/abi/TrustKasTreasury.json";
 import { BLOCKCHAIN_POLLING_INTERVAL_MS } from "@/lib/realtime";
 
-const DEFAULT_RPC_URL = "https://rpc.bohr.life";
-const DEFAULT_CHAIN_ID = 968;
+const DEFAULT_RPC_URL = BOT_NETWORK.rpcUrl;
+const DEFAULT_CHAIN_ID = BOT_NETWORK.chainId;
 
 function readChainId(value: string | undefined) {
   const parsed = Number(value || DEFAULT_CHAIN_ID);

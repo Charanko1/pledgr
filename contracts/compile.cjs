@@ -3,7 +3,7 @@ const path=require('node:path');
 const solc=require('solc');
 function compile(){
   const source=fs.readFileSync(path.join(__dirname,'PledgrTreasuryV2.sol'),'utf8');
-  const output=JSON.parse(solc.compile(JSON.stringify({language:'Solidity',sources:{'PledgrTreasuryV2.sol':{content:source}},settings:{optimizer:{enabled:true,runs:200},evmVersion:'shanghai',outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}}}),{import:name=>{
+  const output=JSON.parse(solc.compile(JSON.stringify({language:'Solidity',sources:{'PledgrTreasuryV2.sol':{content:source}},settings:{optimizer:{enabled:true,runs:1},viaIR:true,evmVersion:'shanghai',outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}}}),{import:name=>{
     try{return {contents:fs.readFileSync(require.resolve(name),'utf8')};}catch{return {error:`Missing dependency ${name}`};}
   }}));
   const errors=(output.errors||[]).filter(e=>e.severity==='error');
@@ -18,3 +18,4 @@ if(require.main===module){
   console.log('Compiled PledgrTreasuryV2; generated ABI and deployment artifact.');
 }
 module.exports={compile};
+

@@ -1,5 +1,6 @@
 "use client";
 
+import { BOT_NETWORK } from "@/lib/network";
 import {
   BrowserProvider,
   Contract,
@@ -9,9 +10,9 @@ import {
 import ABI from "@/lib/abi/TrustKasTreasury.json";
 import { BLOCKCHAIN_POLLING_INTERVAL_MS } from "@/lib/realtime";
 
-const DEFAULT_RPC_URL = "https://rpc.bohr.life";
-const DEFAULT_EXPLORER_URL = "https://scan.bohr.life";
-const DEFAULT_CHAIN_ID = 968;
+const DEFAULT_RPC_URL = BOT_NETWORK.rpcUrl;
+const DEFAULT_EXPLORER_URL = BOT_NETWORK.explorerUrl;
+const DEFAULT_CHAIN_ID = BOT_NETWORK.chainId;
 
 function getConfiguredChainId() {
   const parsed = Number(process.env.NEXT_PUBLIC_BOT_CHAIN_ID || DEFAULT_CHAIN_ID);
@@ -32,7 +33,7 @@ export const BOT_EXPLORER_URL =
 const BOT_CHAIN = {
   chainId: BOT_CHAIN_ID,
   chainName:
-    getConfiguredChainId() === 677 ? "BOT Chain Mainnet" : "BOT Chain Testnet",
+    BOT_NETWORK.name,
   nativeCurrency: {
     name: "BOT",
     symbol: "BOT",

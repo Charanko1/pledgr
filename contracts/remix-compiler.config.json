@@ -1,0 +1,1 @@
+{"language":"Solidity","settings":{"optimizer":{"enabled":true,"runs":1},"viaIR":true,"evmVersion":"shanghai","outputSelection":{"*":{"*":["abi","evm.bytecode","evm.deployedBytecode","metadata"],"":["ast"]}}}}
