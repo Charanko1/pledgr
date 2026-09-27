@@ -21,14 +21,14 @@ export default function MemberBoard({ members, currentRole, onSetValidator, onRe
       <p className="text-sm text-gray-600">Validators: {validatorCount} / 2</p>
       {members.map((member) => (
         <div key={member.membershipId} className="bg-white border p-4 flex flex-wrap gap-4 justify-between items-center shadow-brutal">
-          <div className="flex gap-4 items-center min-w-0">
+          <div className="flex flex-1 gap-4 items-center min-w-0">
             <div className="w-12 h-12 shrink-0 rounded-full bg-primary text-white flex items-center justify-center font-bold">
               {(member.name || "?").charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
               <h3 className="font-semibold truncate">{member.name}</h3>
               <p className="text-sm text-gray-500">{member.role}</p>
-              {member.walletAddress && <p className="text-xs text-gray-400 truncate max-w-[24rem]">{member.walletAddress}</p>}
+              {member.walletAddress && <p className="text-xs text-gray-500 break-all">{member.walletAddress}</p>}
             </div>
           </div>
           {canManage && member.role !== "Admin" && (
